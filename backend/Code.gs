@@ -377,7 +377,8 @@ function table_(key) {
   const rows = sheet_(TABLE_NAMES_[key]).getDataRange().getValues().slice(1);
   // No comprimir huecos: cambiaría los índices y podría sobrescribir otra fila.
   while (rows.length && rows[rows.length - 1].every(function (value) { return value === ''; })) rows.pop();
-  if (rows.some(function (row) { return !row[0]; })) throw apiError_('SCHEMA_MISMATCH', 'Hay una fila sin ID/clave en ' + TABLE_NAMES_[key] + '. Corrige la hoja antes de sincronizar.');
+  const blank = rows.findIndex(function (row) { return !row[0]; });
+  if (blank >= 0) throw apiError_('SCHEMA_MISMATCH', 'Hay una fila sin ID/clave en ' + TABLE_NAMES_[key] + ' (fila ' + (blank + 2) + '). Corrige la hoja antes de sincronizar.');
   return rows.map(function (row) { return rowToObj_(row, HEADERS_[key]); });
 }
 function rowToObj_(row, headers) {

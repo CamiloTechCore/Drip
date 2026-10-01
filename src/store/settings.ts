@@ -3,25 +3,24 @@ import { useSyncExternalStore } from 'react';
 export interface Settings { url: string; isDemo: boolean }
 const STORAGE_KEY = 'drip:settings:v1';
 const listeners = new Set<() => void>();
-const environmentUrl = import.meta.env.VITE_APPS_SCRIPT_URL ?? '';
+const environmentUrl = (import.meta.env.VITE_APPS_SCRIPT_URL ?? '').trim();
 
 function readSettings(): Settings {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
     const stored = value && typeof value === 'object' ? value as Partial<Settings> : {};
-    return { url: typeof stored.url === 'string' ? stored.url : environmentUrl, isDemo: stored.isDemo === true };
+    // The URL always comes from VITE_APPS_SCRIPT_URL; a stale stored value (even '') must never shadow it.
+    return { url: environmentUrl, isDemo: stored.isDemo === true };
   } catch { return { url: environmentUrl, isDemo: false }; }
 }
 
 let current = readSettings();
 export const getSettings = (): Settings => current;
 
-/** The connection URL comes from VITE_APPS_SCRIPT_URL; only isDemo is user-editable here. */
+/** Only isDemo is persisted here; the connection URL is never read from or written to storage. */
 export function setSettings(next: Partial<Settings>): void {
-  const candidate = { ...current, ...next };
-  candidate.url = candidate.url.trim();
-  // Persist before publishing: callers can report blocked browser storage accurately.
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate));
+  const candidate = { url: environmentUrl, isDemo: next.isDemo ?? current.isDemo };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ isDemo: candidate.isDemo }));
   current = candidate;
   listeners.forEach(listener => listener());
 }

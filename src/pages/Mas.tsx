@@ -46,7 +46,6 @@ export default function Mas() {
     entity: EntityName;
     value?: Entity;
   } | null>(null);
-  const [url, setUrl] = useState(settings.url);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const debts = getDebtSummary(data.deudas, data.registros);
@@ -66,22 +65,6 @@ export default function Mas() {
       );
     } finally {
       setBusy(false);
-    }
-  }
-  function connection(e: FormEvent) {
-    e.preventDefault();
-    try {
-      if (
-        url &&
-        !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(
-          url.trim(),
-        )
-      )
-        throw new Error("Usa la URL de Apps Script que termina en /exec.");
-      settings.setSettings({ url: url.trim() });
-      toast("Conexión guardada en este dispositivo");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo guardar");
     }
   }
   async function configSubmit(e: FormEvent<HTMLFormElement>) {
@@ -411,27 +394,11 @@ export default function Mas() {
             <h2>Conecta tu hoja</h2>
             <p className="muted">
               La URL de tu implementación de Apps Script se toma de la
-              configuración del sitio; solo necesitas confirmarla aquí.
+              configuración del sitio y no se puede editar aquí.
             </p>
-            <form className="form-stack" onSubmit={connection}>
-              <label>
-                URL de Apps Script
-                <input
-                  type="url"
-                  inputMode="url"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/…/exec"
-                />
-              </label>
-              <p className="footnote">
-                Cada conexión mantiene sus propios datos locales; exporta
-                antes de cambiarla.
-              </p>
-              <button className="button primary full">Guardar conexión</button>
-            </form>
+            <p className="footnote">
+              {settings.url || "No hay una URL configurada; revisa VITE_APPS_SCRIPT_URL."}
+            </p>
             <button
               className="button secondary full"
               disabled={busy || syncing}
