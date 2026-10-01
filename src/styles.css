@@ -27,7 +27,7 @@
 }
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
 }
 button,
 input,
@@ -1977,40 +1977,6 @@ input::placeholder {
   margin: 20px 0;
   color: var(--muted);
 }
-.auth-page {
-  min-height: 100dvh;
-  padding: calc(env(safe-area-inset-top) + 28px) 22px calc(28px + env(safe-area-inset-bottom));
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 26px;
-}
-.auth-visual {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 14px;
-}
-.auth-visual .brand {
-  justify-content: center;
-}
-.auth-visual p {
-  color: var(--muted);
-  font-size: 0.92rem;
-  max-width: 320px;
-}
-.auth-panel {
-  width: 100%;
-}
-.neural-canvas {
-  width: 100%;
-  max-width: 320px;
-  height: 220px;
-  display: block;
-  border-radius: 24px;
-}
 .spin {
   animation: spin 1.2s linear infinite;
 }
@@ -2022,30 +1988,6 @@ input::placeholder {
 @keyframes shimmer {
   to {
     background-position: -150% 0;
-  }
-}
-@media (min-width: 860px) {
-  .app-shell--auth {
-    max-width: 1060px;
-    box-shadow: none;
-    background: transparent;
-  }
-  .auth-page {
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: 56px;
-    padding: 48px 56px;
-  }
-  .auth-visual {
-    flex: 1 1 420px;
-  }
-  .auth-panel {
-    flex: 0 1 420px;
-  }
-  .neural-canvas {
-    max-width: 420px;
-    height: 320px;
   }
 }
 @media (min-width: 431px) {

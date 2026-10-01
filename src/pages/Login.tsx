@@ -3,9 +3,10 @@ import { LogIn, UserPlus } from "lucide-react";
 import * as client from "../api/client";
 import { useSettings } from "../store/settings";
 import { useAuth } from "../store/auth";
-import { validateEmail, validateName, validatePassword } from "../api/validation";
+import { validateEmail, validateLoginPassword, validateName, validatePassword } from "../api/validation";
 import { Brand, Card } from "../components/ui";
 import { NeuralCanvas } from "../components/NeuralCanvas";
+import "../auth.css";
 
 export default function Login() {
   const settings = useSettings();
@@ -22,12 +23,14 @@ export default function Login() {
     setError("");
     setBusy(true);
     try {
-      // La URL de Apps Script se toma de la configuración del sitio.
-      const account = await client.getAccount({ url: settings.url, isDemo: false });
       const correoValido = validateEmail(correo);
-      const passwordValido = validatePassword(password);
+      const passwordValido = mode === "register" ? validatePassword(password) : validateLoginPassword(password);
+      const nombreValido = mode === "register" ? validateName(nombre) : "";
+      // Validate before opening storage; no request or account state is created for invalid input.
+      if (!settings.url) throw new Error(client.MISSING_CONNECTION_MESSAGE);
+      const account = await client.getAccount({ url: settings.url, isDemo: false });
       const user = mode === "register"
-        ? await client.registerUser(account, { nombre: validateName(nombre), correo: correoValido, password: passwordValido })
+        ? await client.registerUser(account, { nombre: nombreValido, correo: correoValido, password: passwordValido })
         : await client.loginUser(account, { correo: correoValido, password: passwordValido });
       setUser(user);
     } catch (err) {
@@ -39,14 +42,14 @@ export default function Login() {
 
   return (
     <div className="auth-page">
-      <div className="auth-visual" aria-hidden="true">
+      <div className="auth-visual">
         <Brand />
         <NeuralCanvas />
        
       </div>
       <div className="auth-panel">
         <Card>
-          <h2>{mode === "login" ? "Ingresar" : "Crear cuenta"}</h2>
+          <h1>{mode === "login" ? "Ingresar" : "Crear cuenta"}</h1>
           <p className="muted">
             {mode === "login"
               ? "Ingresa con tu correo y contraseña para ver tus registros."
@@ -62,6 +65,7 @@ export default function Login() {
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
                   placeholder="Tu nombre"
+                  maxLength={120}
                   required
                 />
               </label>
@@ -77,6 +81,7 @@ export default function Login() {
                 value={correo}
                 onChange={(e) => setCorreo(e.target.value)}
                 placeholder="tucorreo@ejemplo.com"
+                maxLength={180}
                 required
               />
             </label>
@@ -87,7 +92,8 @@ export default function Login() {
                 autoComplete={mode === "register" ? "new-password" : "current-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Más de 8 caracteres, con un carácter especial"
+                placeholder={mode === "register" ? "Más de 8 caracteres, con un carácter especial" : "Tu contraseña"}
+                maxLength={200}
                 required
               />
             </label>
@@ -103,6 +109,7 @@ export default function Login() {
           </form>
           <button
             className="text-button full"
+            disabled={busy}
             onClick={() => {
               setMode(mode === "login" ? "register" : "login");
               setError("");

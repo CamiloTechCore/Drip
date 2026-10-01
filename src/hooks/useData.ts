@@ -37,7 +37,7 @@ export function useData() {
   }), [namespace, queryClient, queryKey]);
 
   useEffect(() => {
-    if (!account || account.settings.isDemo || !account.settings.url) return;
+    if (!account || account.settings.isDemo || !account.settings.url || !user) return;
     const run = () => { if (navigator.onLine) void sync().catch(() => undefined); };
     run();
     window.addEventListener('online', run);
@@ -50,7 +50,7 @@ export function useData() {
       document.removeEventListener('visibilitychange', visible);
       clearInterval(interval);
     };
-  }, [account, sync]);
+  }, [account, sync, user?.id]);
 
   const requireAccount = useCallback(() => {
     if (!account) throw new Error('El almacenamiento todavía se está abriendo. Inténtalo de nuevo.');
@@ -58,8 +58,8 @@ export function useData() {
   }, [account]);
   const afterLocalWrite = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey });
-    if (account && !account.settings.isDemo && account.settings.url && navigator.onLine) void sync().catch(() => undefined);
-  }, [account, queryClient, queryKey, sync]);
+    if (account && !account.settings.isDemo && account.settings.url && user && navigator.onLine) void sync().catch(() => undefined);
+  }, [account, queryClient, queryKey, sync, user?.id]);
   const saveRegistro = useCallback(async (registro: Registro) => {
     // Conserva quién lo creó originalmente; solo atribuye registros nuevos sin usuario_id.
     const owned = registro.usuario_id ? registro : { ...registro, usuario_id: user?.id ?? '' };

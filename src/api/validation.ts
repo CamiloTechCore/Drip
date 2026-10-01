@@ -43,6 +43,11 @@ export function validatePassword(value: string): string {
   if (typeof value !== 'string' || !/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9\s]).{9,200}$/.test(value)) throw new Error('La contraseña debe tener más de 8 caracteres alfanuméricos e incluir un carácter especial.');
   return value;
 }
+/** Existing credentials must be checked by the server, without applying a newer signup policy or trimming them. */
+export function validateLoginPassword(value: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 200) throw new Error('Ingresa tu contraseña; admite hasta 200 caracteres.');
+  return value;
+}
 export function validateName(value: string): string {
   return text(value, 'El nombre', 120, true);
 }

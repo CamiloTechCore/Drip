@@ -2,7 +2,7 @@ import { get, update } from 'idb-keyval';
 import { EMPTY_DATA } from '../lib/defaults';
 import { createDemoData } from '../lib/demo';
 import { today } from '../lib/format';
-import { validateConfig, validateEntity, validateRegistro } from './validation';
+import { validateConfig, validateEmail, validateEntity, validateLoginPassword, validateName, validatePassword, validateRegistro } from './validation';
 import type { Categoria, Config, DataSet, Entity, EntityName, Recurrente, Registro, Usuario } from '../types';
 import type { Settings } from '../store/settings';
 
@@ -12,6 +12,12 @@ export interface CacheState { version: 1; data: DataSet; queue: QueuedOperation[
 export interface Account { namespace: string; settings: Settings }
 type ListResponse = DataSet & { serverTime: string };
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string; message?: string };
+export const MISSING_CONNECTION_MESSAGE = 'Este despliegue no tiene una conexión configurada. Añade VITE_APPS_SCRIPT_URL en las variables de entorno de Vercel y vuelve a desplegar.';
+export class ApiError extends Error {
+  constructor(readonly code: string, message: string, readonly hadTransportFailure = false) {
+    super(message); this.name = 'ApiError';
+  }
+}
 const listeners = new Set<(namespace: string) => void>();
 const serial = new Map<string, Promise<unknown>>();
 const LOCAL_INDEX = 'drip:unconfigured-stores:v1';
@@ -112,7 +118,7 @@ export async function deleteRegistro(account: Account, id: string): Promise<void
 }
 
 function assertConnection(account: Account): void {
-  if (!account.settings.url) throw new Error('Configura la URL de Apps Script en Más → Ajustes. Tus movimientos quedan guardados en este dispositivo.');
+  if (!account.settings.url) throw new Error(MISSING_CONNECTION_MESSAGE);
   let url: URL;
   try { url = new URL(account.settings.url); } catch { throw new Error('La URL de Apps Script no es válida.'); }
   if (url.protocol !== 'https:' || url.hostname !== 'script.google.com' || !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname)) throw new Error('Usa la URL HTTPS /exec de la implementación de Google Apps Script.');
@@ -122,6 +128,7 @@ function assertConnection(account: Account): void {
 export async function request<T>(account: Account, payload: Record<string, unknown>): Promise<T> {
   assertConnection(account);
   let lastError: Error = new Error('No fue posible conectar con Google Sheets.');
+  let hadTransportFailure = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45_000);
@@ -131,29 +138,52 @@ export async function request<T>(account: Account, payload: Record<string, unkno
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error('El servicio no respondió. Comprueba la implementación de Apps Script.');
-      const result: ApiResponse<T> = await response.json() as ApiResponse<T>;
-      if (!result || typeof result.ok !== 'boolean') throw new Error('La implementación no devolvió JSON válido. Revisa el acceso para cualquier usuario.');
+      if (!response.ok) {
+        const message = 'El servicio no respondió. Comprueba la URL /exec y el acceso para cualquier usuario de la implementación de Apps Script.';
+        if (response.status < 500 && response.status !== 429) throw new ApiError('DEPLOYMENT_ERROR', message, hadTransportFailure);
+        throw new Error(message);
+      }
+      const body = await response.text();
+      let result: ApiResponse<T>;
+      try { result = JSON.parse(body) as ApiResponse<T>; }
+      catch { throw new ApiError('INVALID_RESPONSE', 'La conexión devolvió una página en lugar de datos. Revisa la URL /exec y que Apps Script permita el acceso a cualquier usuario.', hadTransportFailure); }
+      if (!result || typeof result.ok !== 'boolean') throw new ApiError('INVALID_RESPONSE', 'La implementación no devolvió JSON válido. Revisa que esté publicada la versión actual de Apps Script.', hadTransportFailure);
       if (!result.ok) {
         const message = result.message || `El servidor rechazó la operación (${result.error}).`;
         // Validation and authorization failures are not transient.
-        const error = new Error(message); error.name = 'ApiError'; throw error;
+        throw new ApiError(result.error, message, hadTransportFailure);
       }
       return result.data;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Error de conexión.');
-      if (lastError.name === 'ApiError') throw lastError;
+      if (lastError instanceof ApiError) throw lastError;
+      hadTransportFailure = true;
       if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 600 * 2 ** attempt));
     } finally { clearTimeout(timeout); }
   }
   throw new Error(lastError.name === 'AbortError' ? 'Google Sheets tardó demasiado. Tus cambios siguen guardados; vuelve a sincronizar.' : lastError.message);
 }
 
+function publicUser(value: unknown): Usuario {
+  if (!value || typeof value !== 'object') throw new ApiError('INVALID_RESPONSE', 'La implementación no devolvió una cuenta válida. Revisa que esté publicada la versión actual de Apps Script.');
+  const user = value as Partial<Usuario>;
+  if (typeof user.id !== 'string' || !user.id || typeof user.nombre !== 'string' || !user.nombre || typeof user.correo !== 'string' || !user.correo) throw new ApiError('INVALID_RESPONSE', 'La implementación no devolvió una cuenta válida. Revisa que esté publicada la versión actual de Apps Script.');
+  return { id: user.id, nombre: user.nombre, correo: user.correo };
+}
 export async function registerUser(account: Account, input: { nombre: string; correo: string; password: string }): Promise<Usuario> {
-  return request<Usuario>(account, { action: 'register', ...input });
+  const valid = { nombre: validateName(input.nombre), correo: validateEmail(input.correo), password: validatePassword(input.password) };
+  try { return publicUser(await request<unknown>(account, { action: 'register', ...valid })); }
+  catch (error) {
+    // A registration may have reached Sheets even when its acknowledgement was lost.
+    // Confirm those same credentials; never overwrite or recreate an existing account.
+    if (error instanceof ApiError && error.code === 'DUPLICATE_USER' && error.hadTransportFailure) {
+      try { return await loginUser(account, valid); } catch { throw error; }
+    }
+    throw error;
+  }
 }
 export async function loginUser(account: Account, input: { correo: string; password: string }): Promise<Usuario> {
-  return request<Usuario>(account, { action: 'login', ...input });
+  return publicUser(await request<unknown>(account, { action: 'login', correo: validateEmail(input.correo), password: validateLoginPassword(input.password) }));
 }
 
 export async function syncAccount(account: Account): Promise<void> {

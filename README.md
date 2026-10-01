@@ -2,7 +2,7 @@
 
 **Daily Records for Individuals & Partners**: registros diarios para tus finanzas personales y en pareja.
 
-Drip es una PWA en español, de tema claro, diseñada para iPhone 13 (390 × 844). Registra movimientos en Google Sheets mediante un único archivo de Google Apps Script, permite capturar gastos sin conexión y convierte el historial en ciclos, alertas y hábitos de ahorro.
+Drip es una PWA en español, de tema claro, adaptable a teléfonos, tablets y escritorio. Registra movimientos en Google Sheets mediante un único archivo de Google Apps Script, permite capturar gastos sin conexión y convierte el historial en ciclos, alertas y hábitos de ahorro.
 
 Se usa un **libro compartido privado**: quienes conocen la URL acceden al mismo conjunto de datos. Desde `Drip_API:V:0.0.0.03` cada persona inicia sesión con su propio correo y contraseña; ya no existe un token de dispositivo, y la cuenta identifica quien creó cada movimiento mediante `usuario_id`. Puedes usar tags como `personal`, `en pareja` o `hogar`; no representan identidades verificadas, pero ahora se complementan con la cuenta de quien registra. No hay integración bancaria ni publicación en App Store; la aplicación se mantiene exclusivamente como sitio web.
 
@@ -168,7 +168,11 @@ Desde `Drip_API:V:0.0.0.03` Drip admite varias personas en el mismo libro, sin t
 
 La contraseña exige más de 8 caracteres alfanuméricos más un carácter especial; el formulario no permite campos vacíos. El cliente valida lo mismo que el backend antes de enviar la solicitud. La sesión iniciada se guarda únicamente en este dispositivo (`localStorage`) y puedes cerrarla desde **Más → Ajustes → Tu cuenta**; cerrar sesión no borra movimientos ni la conexión guardada.
 
-Cada movimiento nuevo queda asociado al `usuario_id` de quien lo creó. Categorías, deudas, recurrentes y configuración se mantienen compartidas entre todas las cuentas del libro, igual que antes. La pantalla de ingreso muestra una ilustración animada en `<canvas>` (`src/components/NeuralCanvas.tsx`) con tres grupos de nodos — un cerebro, una moneda y una billetera — conectados como neuronas; respeta `prefers-reduced-motion` y se adapta de una columna (móvil) a dos columnas (escritorio, desde 860px).
+Cada movimiento nuevo queda asociado al `usuario_id` de quien lo creó. Categorías, deudas, recurrentes y configuración se mantienen compartidas entre todas las cuentas del libro, igual que antes. La pantalla de ingreso muestra una ilustración animada en `<canvas>` (`src/components/NeuralCanvas.tsx`) con nodos que trazan un cerebro, una moneda Bitcoin y una billetera. Sus contornos se definen en `src/components/neural-scene.ts`; el movimiento suave mantiene reconocibles las figuras, ajusta la resolución a pantallas Retina y respeta cambios en `prefers-reduced-motion`. La animación se pausa cuando no está visible y el dibujo se conserva al redimensionar.
+
+El login usa una columna hasta 799 px y dos desde 800 px, con adaptación adicional para teléfonos en horizontal. `src/auth.css` controla esa vista; `src/responsive.css` adapta las pantallas internas: cuadrículas desde 768 px, navegación inferior en móvil/tablet y barra lateral desde 1100 px. Los formularios se centran en pantallas amplias y permiten desplazamiento en pantallas de poca altura. La PWA admite ambas orientaciones.
+
+Validación visual del 1 de octubre de 2026: login a 320, 390, 768, 844 (horizontal), 1440 y 1920 px; Inicio, Movimientos, Análisis, Más y formularios revisados con datos demo. Se corrigieron desbordamientos de tooltips y etiquetas de navegación en 320 px. Se mantienen pendientes las pruebas en hardware real con Safari/iOS y Android. Estos cambios de presentación no migran registros ni modifican el backend, las credenciales o la conexión a Sheets.
 
 ### Uso diario
 
@@ -245,6 +249,20 @@ La exportación CSV incluye todos los movimientos no eliminados del conjunto abi
 
 La app se sirve siempre desde la raíz del dominio (`base: "/"` fijo en `vite.config.ts`); no hay variable de subruta. Desplígala en un dominio o subdominio propio (GitHub Pages de usuario/organización, un dominio personalizado, Vercel o Netlify), no como página de proyecto en una subruta.
 
+### Vercel (despliegue actual)
+
+1. En el proyecto existente **drip**, abre **Settings → Environment Variables**.
+2. Crea `VITE_APPS_SCRIPT_URL` para **Production** y **Preview**, con exactamente la URL `/exec` ya configurada en el `.env` local. No es la URL del Sheet ni una URL `/dev`; no necesita comillas. El `.env` local está excluido de Git y Vercel no lo recibe automáticamente.
+3. Publica los cambios en la rama conectada o usa **Redeploy**. Vite incorpora la variable al compilar: agregarla al panel no corrige una versión ya publicada.
+4. `vercel.json` define Vite, `npm ci`, `npm run build:vercel` y la salida `dist`. La compilación valida la conexión antes de publicar y falla con un mensaje útil si falta la variable o se pegó una URL incorrecta.
+5. Abre el dominio publicado. Si la PWA muestra “Hay una nueva versión”, pulsa **Actualizar** para cargar la compilación nueva. Usa el correo y contraseña existentes, o cambia a **Regístrate** para crear una cuenta.
+
+No es necesario cambiar de hoja, ejecutar `setup()` de nuevo ni reemplazar usuarios o registros para corregir la configuración de Vercel. Apps Script debe conservar su implementación `/exec`, con **Ejecutar como: Yo** y **Acceso: Cualquier usuario**.
+
+Referencia: [variables de entorno de Vercel y nuevos despliegues](https://vercel.com/docs/environment-variables/managing-environment-variables).
+
+### GitHub Pages (alternativa)
+
 1. Crea un repositorio y sube este proyecto a su rama `main`. Incluye `package-lock.json`.
 2. En **Settings → Pages → Source**, selecciona **GitHub Actions**.
 3. En **Settings → Secrets and variables → Actions → Variables**, crea `VITE_APPS_SCRIPT_URL` con la URL `/exec` de tu implementación.
@@ -254,7 +272,7 @@ La app se sirve siempre desde la raíz del dominio (`base: "/"` fijo en `vite.co
 
 `HashRouter` evita que la navegación interna requiera reescrituras del servidor. El manifest, íconos, `start_url`, `scope` y recursos apuntan a la raíz. El manifest usa `display: standalone`; `index.html` contiene las etiquetas de Apple y `viewport-fit=cover`. Las fuentes están incluidas en los recursos, sin peticiones a Google Fonts.
 
-No se ha creado un repositorio remoto ni una implementación de Google por ti: los valores de tu cuenta deben configurarse con los pasos anteriores.
+La URL de Apps Script debe configurarse por separado en cada proveedor utilizado; no copies contraseñas de usuarios ni hashes a las variables de compilación.
 
 ## 6. Seguridad y solución de problemas
 
@@ -264,6 +282,7 @@ Cada persona tiene su propia contraseña: el backend la guarda como `password_ha
 
 | Síntoma | Comprobación |
 | --- | --- |
+| Funciona localmente, pero Ingresar/Registrarme falla en Vercel | Configura `VITE_APPS_SCRIPT_URL` en Production y vuelve a desplegar; el `.env` local no se publica. |
 | `UNAUTHORIZED` (ingresar) | Correo o contraseña incorrectos; el mensaje no confirma si la cuenta existe. |
 | `DUPLICATE_USER` | Ya existe una cuenta con ese correo en `Usuarios`; usa Ingresar en lugar de Registrarte. |
 | `SERVER_NOT_CONFIGURED` | Configura `SPREADSHEET_ID` en Apps Script y despliega una nueva versión. |
@@ -289,7 +308,7 @@ Este estado separa código disponible de validación en servicios y dispositivos
 | Ciclos, hormiga, repetidos, crecimiento y deuda | Implementado y cubierto por pruebas de analítica |
 | Rachas correctas y pruebas unitarias | 24 pruebas de analítica ejecutadas correctamente |
 | PDF local, descarga y Web Share con alternativas | Implementado; hoja nativa y adjuntos en iPhone pendientes de verificar |
-| Tema claro y diseño para 390 × 844 | Implementado; comprobación final en dispositivo real pendiente |
+| Tema claro y diseño adaptable a móvil, tablet y escritorio | Verificado en navegador de 320 a 1920 px; comprobación en dispositivos reales pendiente |
 | Backend único con constantes requeridas | `backend/Code.gs`, sin archivos backend adicionales |
 | Sin secretos en el repositorio | Sin tokens ni marcadores de credenciales; las cuentas se crean desde la app |
 | Cuentas por correo/contraseña y atribución por `usuario_id` | Implementado en `Drip_API:V:0.0.0.03`, sin token de dispositivo; migración automática de hojas `V:0.0.0.01`/`V:0.0.0.02` |

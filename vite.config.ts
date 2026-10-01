@@ -17,7 +17,7 @@ export default defineConfig(() => {
           description: "Daily Records for Individuals & Partners",
           lang: "es",
           display: "standalone",
-          orientation: "portrait",
+          orientation: "any",
           start_url: base,
           scope: base,
           theme_color: "#F7F8FA",

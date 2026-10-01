@@ -1,0 +1,827 @@
+/* Responsive layout for the signed-in workspace. Login has its own stylesheet.
+   Financial components and their DOM order remain unchanged at every size. */
+.app-shell:not(.app-shell--auth) {
+  --page-gutter: clamp(16px, 4.5vw, 28px);
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  box-shadow: none;
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(
+    main,
+    .page,
+    .card,
+    .page > *,
+    .form-two > *,
+    .balance-stats > *,
+    .two-stats > *
+  ) {
+  min-width: 0;
+}
+
+.app-shell:not(.app-shell--auth) .app-header {
+  padding: calc(22px + env(safe-area-inset-top))
+    max(var(--page-gutter), env(safe-area-inset-right)) 12px
+    max(var(--page-gutter), env(safe-area-inset-left));
+}
+
+.app-shell:not(.app-shell--auth) .page {
+  padding: 20px max(var(--page-gutter), env(safe-area-inset-right))
+    calc(8rem + env(safe-area-inset-bottom))
+    max(var(--page-gutter), env(safe-area-inset-left));
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(.demo-banner, .update-banner, .sync-error) {
+  margin-inline: var(--page-gutter);
+  min-width: 0;
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(
+    .footnote,
+    .note,
+    .entity-card,
+    .menu-row,
+    .insight-list,
+    .form-stack label,
+    .payment-row,
+    .cycle-row
+  ) {
+  overflow-wrap: anywhere;
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(
+    .section-title,
+    .chart-header,
+    .chart-caption span,
+    .balance-footer,
+    .metric-row,
+    .streak-title,
+    .streak-summary,
+    .list-meta,
+    .field-heading,
+    .heat-legend
+  ) {
+  flex-wrap: wrap;
+}
+
+.app-shell:not(.app-shell--auth) :is(.balance-stats, .two-stats) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(
+    .balance-stats strong,
+    .large-metric,
+    .total-card > strong,
+    .soft-metric strong,
+    .streak-card p
+  ) {
+  overflow-wrap: anywhere;
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(.button, .text-button, .segmented button, .period-select button) {
+  min-width: 0;
+  white-space: normal;
+}
+
+.app-shell:not(.app-shell--auth)
+  :is(
+    .connection-status,
+    .streak-card > div,
+    .menu-row > span:nth-child(2),
+    .payment-row > span:nth-child(2)
+  ) {
+  min-width: 0;
+}
+
+.app-shell:not(.app-shell--auth) .connection-status {
+  text-align: right;
+  justify-content: flex-end;
+  overflow-wrap: anywhere;
+}
+
+.app-shell:not(.app-shell--auth) .record-copy > span {
+  flex-wrap: wrap;
+}
+
+.app-shell:not(.app-shell--auth) .record-amount {
+  flex-shrink: 0;
+}
+
+.app-shell:not(.app-shell--auth) .weekday-chart strong {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  font-size: 0.65rem;
+}
+
+.app-shell:not(.app-shell--auth) .calendar-heading > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.app-shell:not(.app-shell--auth) .month-spending {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+/* Recharts keeps inactive tooltips absolutely positioned for measurement.
+   Their invisible boxes must not enlarge a narrow document's scroll area.
+   Active tooltips keep their contents and are remeasured by Recharts on hover. */
+.app-shell:not(.app-shell--auth)
+  .chart
+  .recharts-tooltip-wrapper[style*="visibility: hidden"],
+.app-shell:not(.app-shell--auth)
+  .chart
+  .recharts-tooltip-wrapper[style*="visibility:hidden"] {
+  display: none;
+}
+
+.app-shell:not(.app-shell--auth) .chart .recharts-tooltip-wrapper {
+  max-width: min(100%, 20rem);
+}
+
+.app-shell:not(.app-shell--auth) .chart .recharts-default-tooltip {
+  max-width: 100%;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+}
+
+.app-shell:not(.app-shell--auth) .bottom-nav {
+  max-width: none;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+  padding: 10px max(8px, env(safe-area-inset-right))
+    calc(12px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+
+.app-shell:not(.app-shell--auth) .bottom-nav > a {
+  min-width: 0;
+  padding-inline: 2px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.app-shell:not(.app-shell--auth) .nav-add {
+  min-width: 0;
+}
+
+.app-shell:not(.app-shell--auth) .sheet-overlay {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+.app-shell:not(.app-shell--auth) .sheet {
+  width: 100%;
+  max-width: 480px;
+  min-width: 0;
+  max-height: calc(100dvh - max(12px, env(safe-area-inset-top)));
+  padding-inline: max(20px, env(safe-area-inset-left))
+    max(20px, env(safe-area-inset-right));
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.app-shell:not(.app-shell--auth) .sheet-heading {
+  gap: 12px;
+}
+
+.app-shell:not(.app-shell--auth) .sheet-heading h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-shell:not(.app-shell--auth) .amount-input input {
+  min-width: 0;
+  font-size: clamp(2.5rem, 9vw, 3.7rem);
+}
+
+.app-shell:not(.app-shell--auth) .necessity {
+  flex-wrap: wrap;
+}
+
+.app-shell:not(.app-shell--auth) .necessity > div {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.app-shell:not(.app-shell--auth) .toast {
+  max-width: min(480px, calc(100vw - 32px));
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 599px) {
+  .app-shell:not(.app-shell--auth) .bottom-nav {
+    grid-template-columns: 0.85fr 1.2fr 0.9fr 1.2fr 0.85fr;
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav > a > span {
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+}
+
+@media (max-width: 374px) {
+  .app-shell:not(.app-shell--auth) .card {
+    padding: 17px;
+  }
+
+  .app-shell:not(.app-shell--auth) :is(.records-card, .menu-card) {
+    padding: 0 13px;
+  }
+
+  .app-shell:not(.app-shell--auth) .balance-stats > div + div {
+    padding-left: 12px;
+  }
+
+  .app-shell:not(.app-shell--auth) .balance-amount {
+    font-size: 2.1rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav > a {
+    font-size: 0.65rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .nav-add > span {
+    width: 45px;
+    height: 45px;
+    border-width: 4px;
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet {
+    padding-inline: 16px;
+  }
+
+  .app-shell:not(.app-shell--auth) .category-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-shell:not(.app-shell--auth) .form-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell:not(.app-shell--auth) .summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell:not(.app-shell--auth) .streak-summary {
+    flex-wrap: wrap;
+  }
+
+  .app-shell:not(.app-shell--auth) .weekday-chart {
+    gap: 3px;
+  }
+
+  .app-shell:not(.app-shell--auth) .weekday-chart strong {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+    font-size: 0.6rem;
+  }
+}
+
+/* Wide phones and small tablets retain a familiar bottom navigation. */
+@media (min-width: 600px) {
+  .app-shell:not(.app-shell--auth) {
+    --page-gutter: clamp(28px, 4vw, 44px);
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    width: min(
+      620px,
+      calc(
+        100% -
+          max(
+            48px,
+            calc(env(safe-area-inset-left) + env(safe-area-inset-right) + 32px)
+          )
+      )
+    );
+    border: 1px solid #e4e6ee;
+    border-radius: 22px;
+    box-shadow: 0 10px 40px #24283d12;
+    padding: 10px 20px 12px;
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet-overlay {
+    align-items: center;
+    padding: max(24px, env(safe-area-inset-top))
+      max(24px, env(safe-area-inset-right))
+      max(24px, env(safe-area-inset-bottom))
+      max(24px, env(safe-area-inset-left));
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet {
+    max-height: calc(100dvh - 48px);
+    border-radius: 26px;
+    padding: 0 28px 26px;
+    box-shadow: 0 24px 100px #1e20433b;
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet-handle {
+    height: 28px;
+  }
+
+  .app-shell:not(.app-shell--auth) .page-intro h1 {
+    font-size: clamp(2.25rem, 3.6vw, 2.8rem);
+    letter-spacing: -1.8px;
+  }
+
+  .app-shell:not(.app-shell--auth) .page-intro p {
+    max-width: 54ch;
+  }
+
+  .app-shell:not(.app-shell--auth) .record-row {
+    min-height: 80px;
+    gap: 14px;
+  }
+
+  .app-shell:not(.app-shell--auth) .record-copy > strong {
+    font-size: 0.95rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .record-amount {
+    font-size: 0.9rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-shell:not(.app-shell--auth) .page {
+    gap: 24px;
+  }
+
+  .app-shell:not(.app-shell--auth) :is(.home-page, .analysis-page, .more-page) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .app-shell:not(.app-shell--auth) .home-page > * {
+    grid-column: 1 / -1;
+  }
+
+  .app-shell:not(.app-shell--auth) .home-page > .balance-card {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: stretch;
+  }
+
+  .app-shell:not(.app-shell--auth) .home-page > .streak-card {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: stretch;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    padding: 28px 24px;
+    gap: 16px;
+    position: relative;
+  }
+
+  .app-shell:not(.app-shell--auth) .home-page > .streak-card > div {
+    flex: 0;
+  }
+
+  .app-shell:not(.app-shell--auth) .home-page > .streak-card > svg {
+    position: absolute;
+    right: 18px;
+    top: 18px;
+  }
+
+  .app-shell:not(.app-shell--auth) .streak-card .flame-icon {
+    width: 58px;
+    height: 62px;
+    border-radius: 20px;
+  }
+
+  .app-shell:not(.app-shell--auth) .streak-card .streak-title {
+    justify-content: center;
+  }
+
+  .app-shell:not(.app-shell--auth) .streak-card .streak-title > strong {
+    font-size: 2.5rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .streak-card .streak-title > span {
+    font-size: 1rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .insight-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+    gap: 14px;
+  }
+
+  .app-shell:not(.app-shell--auth) .insight-list > a {
+    padding: 16px;
+  }
+
+  .app-shell:not(.app-shell--auth)
+    :is(.home-page, .analysis-page, .more-page)
+    > :is(
+      .page-intro,
+      .period-select,
+      .period-label,
+      .summary-grid,
+      .error-message,
+      .install-note,
+      .page-signoff,
+      .note,
+      .total-card
+    ) {
+    grid-column: 1 / -1;
+  }
+
+  .app-shell:not(.app-shell--auth) :is(.analysis-page, .more-page) > .card {
+    align-self: stretch;
+  }
+
+  .app-shell:not(.app-shell--auth) .analysis-page > .card:has(> .empty) {
+    grid-column: 1 / -1;
+  }
+
+  .app-shell:not(.app-shell--auth) .period-select {
+    width: 100%;
+    max-width: 520px;
+  }
+
+  .app-shell:not(.app-shell--auth) .period-label {
+    text-align: left;
+    margin-top: -13px;
+  }
+
+  .app-shell:not(.app-shell--auth) .summary-grid {
+    gap: 24px;
+  }
+
+  .app-shell:not(.app-shell--auth) .summary-grid .card {
+    padding: 23px;
+  }
+
+  .app-shell:not(.app-shell--auth) .summary-grid strong {
+    font-size: 1.6rem;
+  }
+
+  .app-shell:not(.app-shell--auth)
+    :is(.home-page, .analysis-page, .more-page)
+    > .button {
+    grid-column: 1 / -1;
+    justify-self: center;
+    max-width: 400px;
+  }
+
+  .app-shell:not(.app-shell--auth) .more-hero {
+    padding: 30px;
+  }
+
+  .app-shell:not(.app-shell--auth) .more-hero h2 {
+    font-size: 1.5rem;
+    line-height: 1.45;
+  }
+
+  .app-shell:not(.app-shell--auth) .about-card {
+    grid-column: 1 / -1;
+    max-width: 780px;
+    padding: 32px;
+    gap: 20px;
+  }
+
+  .app-shell:not(.app-shell--auth) .more-page > .install-note {
+    justify-self: center;
+    max-width: 540px;
+    align-items: center;
+  }
+
+  .app-shell:not(.app-shell--auth) .page:has(> .search-row) {
+    max-width: 1100px;
+    margin-inline: auto;
+  }
+
+  .app-shell:not(.app-shell--auth) .filter-card .form-two {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-shell:not(.app-shell--auth) .search-row {
+    gap: 12px;
+  }
+
+  .app-shell:not(.app-shell--auth) .day-heading {
+    padding-inline: 4px;
+  }
+
+  .app-shell:not(.app-shell--auth) .records-card {
+    padding-inline: 20px;
+  }
+
+  .app-shell:not(.app-shell--auth) .heatmap {
+    gap: 7px;
+  }
+
+  .app-shell:not(.app-shell--auth) .heat-day {
+    min-height: 38px;
+  }
+}
+
+/* Pair the chart and recent movements without moving their headings away from
+   their cards. The narrow layout and keyboard order remain the source order. */
+@media (min-width: 900px) {
+  .app-shell:not(.app-shell--auth) .home-page:has(> .records-card) {
+    grid-template-areas:
+      "intro intro"
+      "balance streak"
+      "signals signals"
+      "insights insights"
+      "chart-title records-title"
+      "chart records"
+      "share share"
+      "signoff signoff";
+  }
+
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .page-intro {
+    grid-area: intro;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .balance-card {
+    grid-area: balance;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .streak-card {
+    grid-area: streak;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .section-title:has(+ .insight-list) {
+    grid-area: signals;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .insight-list {
+    grid-area: insights;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .section-title:has(+ .card:not(.records-card)) {
+    grid-area: chart-title;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .section-title:has(+ .records-card) {
+    grid-area: records-title;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .card:not(.records-card):not(.welcome-card) {
+    grid-area: chart;
+    align-self: stretch;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .records-card {
+    grid-area: records;
+    align-self: stretch;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .share-button {
+    grid-area: share;
+  }
+  .app-shell:not(.app-shell--auth)
+    .home-page:has(> .records-card)
+    > .page-signoff {
+    grid-area: signoff;
+  }
+
+  .app-shell:not(.app-shell--auth)
+    .more-page:has(> .menu-card):not(:has(> .more-hero))
+    > .menu-card {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 28px;
+    padding-inline: 24px;
+  }
+}
+
+/* Desktop workspace: a persistent side rail, wider dashboard and quieter header. */
+@media (min-width: 1100px) {
+  .app-shell:not(.app-shell--auth) {
+    --sidebar-width: 224px;
+    --page-gutter: 36px;
+    max-width: 1440px;
+    padding-left: var(--sidebar-width);
+  }
+
+  .app-shell:not(.app-shell--auth) .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    justify-content: flex-end;
+    min-height: 84px;
+    padding: 20px var(--page-gutter);
+    /* A filter would make this header the containing block of its fixed brand. */
+    background: #f7f8fa;
+    backdrop-filter: none;
+    border-bottom: 1px solid #e8eaf1;
+  }
+
+  .app-shell:not(.app-shell--auth) .app-header > a {
+    position: fixed;
+    left: max(30px, calc((100vw - 1440px) / 2 + 30px));
+    top: 30px;
+    z-index: 40;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .app-shell:not(.app-shell--auth) .connection-status {
+    padding: 8px 12px;
+    border: 1px solid #e7e9f0;
+    border-radius: 10px;
+    background: #fff;
+    font-size: 0.8rem;
+    gap: 7px;
+  }
+
+  .app-shell:not(.app-shell--auth) .page {
+    padding-top: 30px;
+    padding-bottom: 50px;
+    gap: 25px;
+  }
+
+  .app-shell:not(.app-shell--auth) .page-intro {
+    margin-bottom: 6px;
+  }
+
+  .app-shell:not(.app-shell--auth) .page-intro h1 {
+    font-size: 2.65rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .home-page > .page-intro h1 br {
+    display: none;
+  }
+
+  .app-shell:not(.app-shell--auth)
+    .home-page
+    > .page-intro
+    h1
+    > span:not(.title-dot)::before {
+    content: " ";
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav {
+    position: fixed;
+    inset: 0 auto 0 max(0px, calc((100vw - 1440px) / 2));
+    width: var(--sidebar-width);
+    max-width: none;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 9px;
+    padding: 116px 20px 26px;
+    background: #fff;
+    border: 0;
+    border-right: 1px solid #e5e8f0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow-y: auto;
+    backdrop-filter: none;
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav > a {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 13px;
+    min-height: 52px;
+    font-size: 0.85rem;
+    text-align: left;
+    transition:
+      background-color 160ms ease,
+      color 160ms ease;
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav > a.active {
+    background: #efedff;
+  }
+
+  .app-shell:not(.app-shell--auth) .nav-add {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 52px;
+    margin: 3px 0;
+    gap: 12px;
+    padding: 13px 14px;
+    background: var(--primary);
+    border-radius: 13px;
+    color: white;
+    box-shadow: 0 5px 14px #5551e81c;
+  }
+
+  .app-shell:not(.app-shell--auth) .nav-add > span {
+    width: 21px;
+    height: 24px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .app-shell:not(.app-shell--auth) .nav-add > span svg {
+    width: 23px;
+    height: 23px;
+  }
+
+  .app-shell:not(.app-shell--auth) .nav-add small {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .app-shell:not(.app-shell--auth) .toast {
+    left: calc(50% + var(--sidebar-width) / 2);
+    bottom: 28px;
+    max-width: min(520px, calc(100vw - var(--sidebar-width) - 48px));
+  }
+
+  .app-shell:not(.app-shell--auth)
+    :is(.demo-banner, .update-banner, .sync-error) {
+    margin-top: 18px;
+    padding: 10px 16px;
+    font-size: 0.8rem;
+  }
+
+  .app-shell:not(.app-shell--auth) .balance-card {
+    padding: 28px;
+  }
+
+  .app-shell:not(.app-shell--auth) .balance-amount {
+    font-size: clamp(2.2rem, 3vw, 2.9rem);
+    margin-block: 24px 28px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .app-shell:not(.app-shell--auth) .bottom-nav > a:not(.active):hover {
+    color: var(--primary);
+    background: #f5f4ff;
+  }
+
+  .app-shell:not(.app-shell--auth)
+    :is(.insight-list > a, .entity-card, .menu-row):hover {
+    background-color: #f9f9fe;
+  }
+}
+
+/* Keep forms and navigation usable in short landscape viewports, including
+   phones with a notch. Sheets scroll independently instead of leaving the screen. */
+@media (max-height: 540px) and (orientation: landscape) {
+  .app-shell:not(.app-shell--auth) .sheet-overlay {
+    padding: 10px max(16px, env(safe-area-inset-right)) 10px
+      max(16px, env(safe-area-inset-left));
+    align-items: center;
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet {
+    max-height: calc(100dvh - 20px);
+    border-radius: 20px;
+    padding-bottom: 20px;
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet-handle {
+    height: 18px;
+  }
+
+  .app-shell:not(.app-shell--auth) .sheet-heading {
+    margin-bottom: 10px;
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav {
+    padding-top: 6px;
+  }
+
+  .app-shell:not(.app-shell--auth) .bottom-nav > a {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 1100px) and (max-height: 540px) {
+  .app-shell:not(.app-shell--auth) .bottom-nav {
+    padding-top: 96px;
+  }
+}

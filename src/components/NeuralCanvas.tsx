@@ -1,54 +1,14 @@
 import { useEffect, useRef } from "react";
+import {
+  createNeuralScene,
+  FIGURE_COLORS,
+  SCENE_HEIGHT,
+  SCENE_WIDTH,
+} from "./neural-scene";
 
-type Cluster = 0 | 1 | 2;
-interface Particle { x: number; y: number; vx: number; vy: number; r: number; cluster: Cluster; homeX: number; homeY: number; maxR: number }
-interface ClusterDef { x: number; y: number; r: number; count: number; color: string }
+const scene = createNeuralScene();
 
-// Posiciones relativas (0-1) de cada figura: cerebro, moneda y billetera.
-const CLUSTERS: ClusterDef[] = [
-  { x: 0.24, y: 0.3, r: 0.2, count: 22, color: "85,81,232" },
-  { x: 0.78, y: 0.24, r: 0.15, count: 14, color: "19,132,101" },
-  { x: 0.52, y: 0.8, r: 0.19, count: 20, color: "85,81,232" },
-];
-const BRIDGE_COLOR = "154,147,240";
-const LINK_DISTANCE = 46;
-
-function createParticles(width: number, height: number): Particle[] {
-  const particles: Particle[] = [];
-  CLUSTERS.forEach((cluster, index) => {
-    const cx = cluster.x * width;
-    const cy = cluster.y * height;
-    const maxR = cluster.r * Math.min(width, height);
-    for (let i = 0; i < cluster.count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.sqrt(Math.random()) * maxR;
-      particles.push({
-        x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius,
-        vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 0.5) * 0.5,
-        r: Math.random() * 1.6 + 1.6, cluster: index as Cluster, homeX: cx, homeY: cy, maxR,
-      });
-    }
-  });
-  return particles;
-}
-
-/** Closest node pair between each pair of figures, so they always read as one connected network. */
-function findBridges(particles: Particle[]): [Particle, Particle][] {
-  const pairs: [Cluster, Cluster][] = [[0, 1], [1, 2], [2, 0]];
-  return pairs.map(([a, b]) => {
-    const groupA = particles.filter(p => p.cluster === a);
-    const groupB = particles.filter(p => p.cluster === b);
-    let best: [Particle, Particle] = [groupA[0], groupB[0]];
-    let bestDist = Infinity;
-    groupA.forEach(pa => groupB.forEach(pb => {
-      const dist = Math.hypot(pa.x - pb.x, pa.y - pb.y);
-      if (dist < bestDist) { bestDist = dist; best = [pa, pb]; }
-    }));
-    return best;
-  });
-}
-
-/** Animated dot network: a brain, a coin and a wallet drifting and firing synapses. */
+/** Anchored contours stay recognizable while small pulses move through the network. */
 export function NeuralCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -56,84 +16,146 @@ export function NeuralCanvas() {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let width = 0;
-    let height = 0;
-    let particles: Particle[] = [];
-    let bridges: [Particle, Particle][] = [];
-    let frame = 0;
-    let animationFrameId = 0;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let width = 0,
+      height = 0,
+      frame = 0,
+      lastDraw = 0;
+    let visible = true;
 
-    const setup = () => {
-      const rect = canvas.parentElement?.getBoundingClientRect();
-      width = canvas.width = Math.round(rect?.width || canvas.clientWidth || 320);
-      height = canvas.height = Math.round(rect?.height || canvas.clientHeight || 220);
-      particles = createParticles(width, height);
-      bridges = findBridges(particles);
-    };
-
-    const step = () => {
-      frame += 1;
+    const draw = (time: number) => {
       ctx.clearRect(0, 0, width, height);
-      if (!reduced) {
-        particles.forEach(p => {
-          p.x += p.vx; p.y += p.vy;
-          const dx = p.x - p.homeX;
-          const dy = p.y - p.homeY;
-          if (Math.hypot(dx, dy) > p.maxR) { p.vx -= dx * 0.0025; p.vy -= dy * 0.0025; }
-          p.vx *= 0.99; p.vy *= 0.99;
-        });
-      }
-      for (let i = 0; i < particles.length; i++) {
-        const a = particles[i];
-        for (let j = i + 1; j < particles.length; j++) {
-          const b = particles[j];
-          if (a.cluster !== b.cluster) continue;
-          const dist = Math.hypot(a.x - b.x, a.y - b.y);
-          if (dist < LINK_DISTANCE) {
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.strokeStyle = `rgba(${CLUSTERS[a.cluster].color}, ${0.5 * (1 - dist / LINK_DISTANCE)})`;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-        }
-      }
-      bridges.forEach(([a, b], i) => {
-        const pulse = reduced ? 0.4 : 0.25 + 0.3 * Math.sin(frame / 40 + i * 2);
+      const scale = Math.min(width / SCENE_WIDTH, height / SCENE_HEIGHT);
+      if (!scale) return;
+      const seconds = reducedMotion.matches ? 0 : time / 1000;
+      const movement = reducedMotion.matches ? 0 : 0.8;
+      const points = scene.nodes.map((node) => ({
+        ...node,
+        x: node.x + Math.sin(seconds * 0.55 + node.phase) * movement,
+        y: node.y + Math.cos(seconds * 0.45 + node.phase) * movement,
+      }));
+      ctx.save();
+      ctx.translate(
+        (width - SCENE_WIDTH * scale) / 2,
+        (height - SCENE_HEIGHT * scale) / 20,
+      );
+      ctx.scale(scale, scale);
+      scene.centers.forEach(([x, y], i) => {
+        const color = Object.values(FIGURE_COLORS)[i];
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, 105);
+        glow.addColorStop(0, `rgba(${color},0.055)`);
+        glow.addColorStop(1, `rgba(${color},0)`);
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - 105, y - 105, 210, 210);
+      });
+      scene.bridges.forEach(([ai, bi], i) => {
+        const a = points[ai],
+          b = points[bi];
+        const gradient = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        gradient.addColorStop(0, `rgba(${FIGURE_COLORS[a.figure]},0.24)`);
+        gradient.addColorStop(1, `rgba(${FIGURE_COLORS[b.figure]},0.24)`);
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = `rgba(${BRIDGE_COLOR}, ${pulse})`;
-        ctx.setLineDash([2, 5]);
-        ctx.lineWidth = 1.1;
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 7]);
         ctx.stroke();
         ctx.setLineDash([]);
-      });
-      particles.forEach(p => {
+        const progress = reducedMotion.matches
+          ? 0.5
+          : (seconds * 0.11 + i * 0.33) % 1;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${CLUSTERS[p.cluster].color}, 0.85)`;
+        ctx.arc(
+          a.x + (b.x - a.x) * progress,
+          a.y + (b.y - a.y) * progress,
+          2.7,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fillStyle = `rgba(${FIGURE_COLORS[a.figure]},0.65)`;
         ctx.fill();
       });
-      if (!reduced) animationFrameId = requestAnimationFrame(step);
+      scene.edges.forEach(({ a, b, structural }) => {
+        ctx.beginPath();
+        ctx.moveTo(points[a].x, points[a].y);
+        ctx.lineTo(points[b].x, points[b].y);
+        ctx.strokeStyle = `rgba(${FIGURE_COLORS[points[a].figure]},${structural ? 0.5 : 0.17})`;
+        ctx.lineWidth = structural ? 1.45 : 0.85;
+        ctx.stroke();
+      });
+      points.forEach((point) => {
+        const color = FIGURE_COLORS[point.figure];
+        if (point.emphasis) {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${color},0.08)`;
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, point.emphasis ? 2.9 : 1.95, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${color},${point.emphasis ? 0.95 : 0.75})`;
+        ctx.fill();
+      });
+      ctx.restore();
     };
 
-    setup();
-    step();
-    const resizeObserver = new ResizeObserver(() => setup());
-    if (canvas.parentElement) resizeObserver.observe(canvas.parentElement);
-
-    return () => { cancelAnimationFrame(animationFrameId); resizeObserver.disconnect(); };
+    const animate = (time: number) => {
+      if (time - lastDraw >= 1000 / 30) {
+        draw(time);
+        lastDraw = time;
+      }
+      frame = requestAnimationFrame(animate);
+    };
+    const resume = () => {
+      cancelAnimationFrame(frame);
+      draw(performance.now());
+      if (!reducedMotion.matches && visible && !document.hidden)
+        frame = requestAnimationFrame(animate);
+    };
+    const resize = () => {
+      const bounds = canvas.getBoundingClientRect();
+      width = bounds.width;
+      height = bounds.height;
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      // Resizing clears the bitmap: redraw even when animations are disabled.
+      resume();
+    };
+    const resizeObserver = new ResizeObserver(resize);
+    const intersectionObserver = new IntersectionObserver(([entry]) => {
+      visible = entry.isIntersecting;
+      resume();
+    });
+    resizeObserver.observe(canvas);
+    intersectionObserver.observe(canvas);
+    reducedMotion.addEventListener("change", resume);
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("resize", resize);
+    resize();
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      reducedMotion.removeEventListener("change", resume);
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("resize", resize);
+    };
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="neural-canvas"
-      role="img"
-      aria-label="Red de nodos animada que conecta un cerebro, una moneda y una billetera"
-    />
+    <div className="neural-scene">
+      <canvas
+        ref={canvasRef}
+        className="neural-canvas"
+        role="img"
+        aria-label="Tres figuras conectadas por nodos: un cerebro, una moneda Bitcoin y una billetera"
+      >
+        Un cerebro, una moneda Bitcoin y una billetera conectados por una red de
+        nodos.
+      </canvas>
+    </div>
   );
 }
