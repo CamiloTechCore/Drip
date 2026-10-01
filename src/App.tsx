@@ -106,7 +106,7 @@ function DripApp() {
   const share = () => setSharing(true);
   return (
     <AppContext.Provider value={{ ...model, add, share, toast: setMessage }}>
-      <div className="app-shell">
+      <div className={`app-shell${needsAuth ? " app-shell--auth" : ""}`}>
         {needsAuth ? (
           <Login />
         ) : (

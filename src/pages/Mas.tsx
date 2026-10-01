@@ -47,7 +47,6 @@ export default function Mas() {
     value?: Entity;
   } | null>(null);
   const [url, setUrl] = useState(settings.url);
-  const [token, setToken] = useState(settings.token);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const debts = getDebtSummary(data.deudas, data.registros);
@@ -79,9 +78,7 @@ export default function Mas() {
         )
       )
         throw new Error("Usa la URL de Apps Script que termina en /exec.");
-      if (token && token.trim().length < 24)
-        throw new Error("El token debe tener al menos 24 caracteres.");
-      settings.setSettings({ url: url.trim(), token: token.trim() });
+      settings.setSettings({ url: url.trim() });
       toast("Conexión guardada en este dispositivo");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar");
@@ -413,8 +410,8 @@ export default function Mas() {
           <Card>
             <h2>Conecta tu hoja</h2>
             <p className="muted">
-              Pega la dirección de tu implementación y el token que elegiste en
-              Apps Script.
+              La URL de tu implementación de Apps Script se toma de la
+              configuración del sitio; solo necesitas confirmarla aquí.
             </p>
             <form className="form-stack" onSubmit={connection}>
               <label>
@@ -429,21 +426,9 @@ export default function Mas() {
                   placeholder="https://script.google.com/macros/s/…/exec"
                 />
               </label>
-              <label>
-                Token de acceso
-                <input
-                  type="password"
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Al menos 24 caracteres"
-                />
-              </label>
               <p className="footnote">
-                El token se guarda solo en este dispositivo. Cada conexión
-                mantiene sus propios datos locales; exporta antes de cambiarla.
+                Cada conexión mantiene sus propios datos locales; exporta
+                antes de cambiarla.
               </p>
               <button className="button primary full">Guardar conexión</button>
             </form>

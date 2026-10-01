@@ -13,11 +13,11 @@ export function useData() {
   useEffect(() => {
     let active = true;
     setAccount(null); setError(null);
-    void client.getAccount({ url: settings.url, token: settings.token, isDemo: settings.isDemo }).then(value => {
+    void client.getAccount({ url: settings.url, isDemo: settings.isDemo }).then(value => {
       if (active) setAccount(value);
     }).catch(() => { if (active) setError('No pudimos abrir el almacenamiento seguro de este dispositivo.'); });
     return () => { active = false; };
-  }, [settings.url, settings.token, settings.isDemo]);
+  }, [settings.url, settings.isDemo]);
   const namespace = account?.namespace ?? 'loading';
   const queryKey = useMemo(() => ['drip-data', namespace], [namespace]);
   const query = useQuery({ queryKey, queryFn: () => client.readCache(account!), enabled: !!account, staleTime: Infinity, retry: 1 });
@@ -35,7 +35,7 @@ export function useData() {
   }), [namespace, queryClient, queryKey]);
 
   useEffect(() => {
-    if (!account || account.settings.isDemo || !account.settings.url || !account.settings.token) return;
+    if (!account || account.settings.isDemo || !account.settings.url) return;
     const run = () => { if (navigator.onLine) void sync().catch(() => undefined); };
     run();
     window.addEventListener('online', run);
@@ -50,7 +50,7 @@ export function useData() {
   }, [account]);
   const afterLocalWrite = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey });
-    if (account && !account.settings.isDemo && account.settings.url && account.settings.token && navigator.onLine) void sync().catch(() => undefined);
+    if (account && !account.settings.isDemo && account.settings.url && navigator.onLine) void sync().catch(() => undefined);
   }, [account, queryClient, queryKey, sync]);
   const saveRegistro = useCallback(async (registro: Registro) => {
     await client.saveRegistro(requireAccount(), registro); await afterLocalWrite();

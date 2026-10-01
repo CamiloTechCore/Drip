@@ -10,7 +10,7 @@ const row = (id: string = crypto.randomUUID(), changes: Partial<Registro> = {}):
   tags: 'tinto', descripcion: 'Tinto', metodo_pago: 'efectivo', necesidad: 'innecesario',
   recurrente_id: '', deuda_id: '', creado_en: '2026-09-30T10:00:00.000Z', actualizado_en: '2026-09-30T10:00:00.000Z', eliminado: false, ...changes,
 });
-const connected = (): Promise<Account> => getAccount({ url: 'https://script.google.com/macros/s/TEST_DEPLOYMENT/exec', token: 'test-only-token-'.repeat(3), isDemo: false });
+const connected = (): Promise<Account> => getAccount({ url: 'https://script.google.com/macros/s/TEST_DEPLOYMENT/exec', isDemo: false });
 function response(data: unknown): Response { return new Response(JSON.stringify({ ok: true, data }), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
 
 beforeEach(async () => { await clear(); vi.stubGlobal('navigator', { onLine: true }); });
@@ -34,18 +34,18 @@ describe('durable offline cache', () => {
     expect(state.queue[1].operation.action).toBe('delete');
   });
 
-  it('isolates credentials and demo from real financial data', async () => {
+  it('isolates other connections and demo from real financial data', async () => {
     const account = await connected(); await saveRegistro(account, row('private-row'));
-    const other = await getAccount({ ...account.settings, token: 'another-test-token-'.repeat(3) });
+    const other = await getAccount({ ...account.settings, url: 'https://script.google.com/macros/s/OTHER_DEPLOYMENT/exec' });
     const demo = await getAccount({ ...account.settings, isDemo: true });
     expect((await readCache(other)).data.registros).toHaveLength(0);
     expect((await readCache(demo)).data.registros.some(item => item.id === 'private-row')).toBe(false);
     expect((await readCache(demo)).queue).toHaveLength(0);
-    expect(account.namespace).not.toContain(account.settings.token);
+    expect(account.namespace).not.toContain(account.settings.url);
   });
 
   it('explicitly imports local-only records once while preserving the source', async () => {
-    const local = await getAccount({ url: '', token: '', isDemo: false });
+    const local = await getAccount({ url: '', isDemo: false });
     await saveRegistro(local, row('offline-first'));
     const account = await connected();
     expect(await importLocalRecords(account)).toBe(1);
@@ -124,7 +124,7 @@ describe('synchronization', () => {
     const account = await connected(); await saveRegistro(account, row());
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: 'UNAUTHORIZED' })));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(syncAccount(account)).rejects.toThrow('token');
+    await expect(syncAccount(account)).rejects.toThrow('UNAUTHORIZED');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect((await readCache(account)).queue).toHaveLength(1);
   });
@@ -213,7 +213,7 @@ describe('local validation and demo parity', () => {
   });
 
   it('rejects invalid demo settings/entities and cascades a valid category rename', async () => {
-    const demo = await getAccount({ url: '', token: '', isDemo: true });
+    const demo = await getAccount({ url: '', isDemo: true });
     const original = (await readCache(demo)).data;
     const category = original.categorias.find(item => item.nombre === 'Servicios')!;
     await expect(saveConfig(demo, { ...original.config, dia_corte: 32 })).rejects.toThrow();
@@ -231,7 +231,7 @@ describe('local validation and demo parity', () => {
   });
 
   it('materializes demo occurrences with month-end clamping and never recreates tombstones', async () => {
-    const demo = await getAccount({ url: '', token: '', isDemo: true });
+    const demo = await getAccount({ url: '', isDemo: true });
     const template: Recurrente = { id: 'month-end-demo', descripcion: 'Pago fin de mes', monto: 100000, categoria: 'Servicios', tags: '', frecuencia: 'mensual', dia: 31, proximo_pago: '2026-01-31', metodo_pago: 'transferencia', activa: true };
     await saveEntity(demo, 'recurrente', template);
     await materialize(demo, '2026-03-31');

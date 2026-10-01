@@ -4,7 +4,7 @@
 
 Drip es una PWA en español, de tema claro, diseñada para iPhone 13 (390 × 844). Registra movimientos en Google Sheets mediante un único archivo de Google Apps Script, permite capturar gastos sin conexión y convierte el historial en ciclos, alertas y hábitos de ahorro.
 
-Se usa un **libro compartido privado**: quienes conocen la URL y el token acceden al mismo conjunto de datos. Desde `Drip_API:V:0.0.0.02` cada persona además inicia sesión con su propio correo y contraseña; el token sigue siendo el acceso compartido del dispositivo/implementación, y la cuenta identifica quién creó cada movimiento mediante `usuario_id`. Puedes usar tags como `personal`, `en pareja` o `hogar`; no representan identidades verificadas, pero ahora se complementan con la cuenta de quien registra. No hay integración bancaria ni publicación en App Store.
+Se usa un **libro compartido privado**: quienes conocen la URL acceden al mismo conjunto de datos. Desde `Drip_API:V:0.0.0.03` cada persona inicia sesión con su propio correo y contraseña; ya no existe un token de dispositivo, y la cuenta identifica quien creó cada movimiento mediante `usuario_id`. Puedes usar tags como `personal`, `en pareja` o `hogar`; no representan identidades verificadas, pero ahora se complementan con la cuenta de quien registra. No hay integración bancaria ni publicación en App Store; la aplicación se mantiene exclusivamente como sitio web.
 
 ## 1. Backend: un único `Code.gs`
 
@@ -14,32 +14,29 @@ El backend completo está en [`backend/Code.gs`](backend/Code.gs). No requiere a
 
 1. Crea un Google Sheet vacío y copia el ID de su URL: `https://docs.google.com/spreadsheets/d/ID_DE_LA_HOJA/edit`.
 2. Abre **Extensiones → Apps Script**. Sustituye el contenido de `Code.gs` por [`backend/Code.gs`](backend/Code.gs).
-3. Modifica las cuatro constantes al inicio **en el editor de Apps Script**:
+3. Modifica las tres constantes al inicio **en el editor de Apps Script**:
 
    ```javascript
    const SPREADSHEET_ID = 'PEGA_AQUI_EL_ID_DE_TU_HOJA';
    const SHEET_NAME = 'Registros';
-   const API_TOKEN = 'CAMBIA_ESTE_TOKEN_LARGO';
    const TIMEZONE = 'America/Bogota';
    ```
 
-4. Reemplaza el marcador de `API_TOKEN` por un secreto aleatorio de al menos 24 caracteres, generado con tu gestor de contraseñas. Conserva el archivo del repositorio con su marcador; el secreto real va únicamente en Apps Script y en los ajustes del dispositivo.
-5. Ejecuta `setup()` desde el editor y autoriza sus permisos. Se crean las pestañas, encabezados, formatos, listas desplegables, categorías iniciales y la hoja `Usuarios`.
-6. Selecciona **Implementar → Nueva implementación → Aplicación web**. Configura **Ejecutar como: Yo** y **Quién tiene acceso: Cualquier usuario**.
-7. Copia la URL terminada en `/exec`. Puedes abrirla para comprobar `{"ok":true,"service":"finanzas","version":"Drip_API:V:0.0.0.02"}`. La prueba de vida no revela datos ni requiere token.
-8. En Drip, la primera pantalla pide la URL y el token (si no están guardados) y luego el correo y la contraseña para ingresar o registrarte.
+4. Ejecuta `setup()` desde el editor y autoriza sus permisos. Se crean las pestañas, encabezados, formatos, listas desplegables, categorías iniciales y la hoja `Usuarios`.
+5. Selecciona **Implementar → Nueva implementación → Aplicación web**. Configura **Ejecutar como: Yo** y **Quién tiene acceso: Cualquier usuario**.
+6. Copia la URL terminada en `/exec`. Puedes abrirla para comprobar `{"ok":true,"service":"finanzas","version":"Drip_API:V:0.0.0.03"}`. La prueba de vida no revela datos.
+7. En Drip, la primera pantalla pide el correo y la contraseña para ingresar o registrarte; la URL de Apps Script ya viene configurada desde `VITE_APPS_SCRIPT_URL`.
 
 Cada modificación del backend requiere editar la implementación y seleccionar **Nueva versión**. Reutilizar la implementación mantiene su URL. La URL `/dev` del editor no sirve como conexión de producción.
 
-`setup()` es repetible y no borra movimientos ni usuarios. El backend comprueba los encabezados y devuelve `SCHEMA_MISMATCH` si su orden fue modificado; conserva los nombres y el orden de las columnas. Una hoja `Registros` creada con `Drip_API:V:0.0.0.01` se actualiza automáticamente agregando la columna `usuario_id` al ejecutar `setup()` o la primera petición; no es necesario recrear la pestaña. No compartas públicamente el Sheet: el script accede mediante tu cuenta.
+`setup()` es repetible y no borra movimientos ni usuarios. El backend comprueba los encabezados y devuelve `SCHEMA_MISMATCH` si su orden fue modificado; conserva los nombres y el orden de las columnas. Una hoja `Registros` creada con `Drip_API:V:0.0.0.01` se actualiza automáticamente agregando la columna `usuario_id` al ejecutar `setup()` o la primera petición; no es necesario recrear la pestaña. El acceso ya no depende de un token compartido: cualquier persona con la URL puede llamar a la API, y la hoja de `Usuarios` es la única barrera de identidad. No compartas públicamente el Sheet ni la URL del despliegue si no quieres que se registren cuentas nuevas.
 
 ### Contrato HTTP
 
-Las operaciones usan `POST` con JSON en el cuerpo y `Content-Type: text/plain;charset=utf-8`. El token se transmite en el cuerpo, nunca en parámetros de la URL. El cliente usa `redirect: 'follow'`, `credentials: 'omit'`, tiempo máximo de espera y reintentos de errores de red. Google sirve las respuestas de Content Service mediante una redirección a `script.googleusercontent.com`; por eso el cliente debe seguir redirecciones. [Documentación oficial de Content Service](https://developers.google.com/apps-script/guides/content).
+Las operaciones usan `POST` con JSON en el cuerpo y `Content-Type: text/plain;charset=utf-8`. El cliente usa `redirect: 'follow'`, `credentials: 'omit'`, tiempo máximo de espera y reintentos de errores de red. Google sirve las respuestas de Content Service mediante una redirección a `script.googleusercontent.com`; por eso el cliente debe seguir redirecciones. [Documentación oficial de Content Service](https://developers.google.com/apps-script/guides/content).
 
 ```json
 {
-  "token": "TOKEN_INGRESADO_EN_AJUSTES",
   "action": "upsert",
   "registro": {
     "id": "7f725289-284c-4c32-a3e7-0a89b1bf8ac5",
@@ -68,7 +65,7 @@ Las operaciones usan `POST` con JSON en el cuerpo y `Content-Type: text/plain;ch
 | `register` | `nombre`, `correo`, `password` | Cuenta creada en `Usuarios`; retorna `id`, `nombre`, `correo` (nunca el hash ni la sal) |
 | `login` | `correo`, `password` | Cuenta autenticada; retorna `id`, `nombre`, `correo` |
 
-El token sigue siendo obligatorio en `register` y `login`: autentica el dispositivo/implementación, mientras que el correo y la contraseña identifican a la persona dentro del libro compartido. La contraseña exige más de 8 caracteres alfanuméricos más un carácter especial, validado tanto en el cliente como en el servidor. Los errores de `login` usan siempre el mismo mensaje genérico para no confirmar si un correo existe.
+El correo y la contraseña identifican a la persona dentro del libro compartido; ya no hay un token de dispositivo separado. La contraseña exige más de 8 caracteres alfanuméricos más un carácter especial, validado tanto en el cliente como en el servidor. Los errores de `login` usan siempre el mismo mensaje genérico para no confirmar si un correo existe.
 
 Las respuestas siguen `{ok:true,data:…}` o `{ok:false,error:"CODIGO",message:"…"}`. `doGet` es la única excepción de forma: responde directamente con `ok` y `service`. No se confía en el código HTTP para distinguir errores de aplicación.
 
@@ -120,10 +117,9 @@ Para configurar por archivo, copia `.env.example` a `.env.local`:
 
 ```dotenv
 VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/XXXXXXXX/exec
-VITE_BASE_PATH=/NOMBRE-DEL-REPO/
 ```
 
-En desarrollo sin subruta usa `VITE_BASE_PATH=/`. La URL guardada en Ajustes tiene prioridad sobre el valor del entorno. **No crees variables de token**: cualquier variable `VITE_*` termina en el bundle público.
+La app se sirve siempre desde la raíz del dominio; no hay variable de subruta. **No crees variables de token**: cualquier variable `VITE_*` termina en el bundle público, y la autenticación ya no usa un token de dispositivo.
 
 ```bash
 npm test
@@ -151,7 +147,7 @@ src/router.tsx                  Rutas hash compatibles con Pages
 src/types.ts                    Modelo compartido del cliente
 src/api/client.ts               HTTP, IndexedDB, cola y sincronización
 src/api/validation.ts           Validación de registros, entidades y credenciales
-src/store/settings.ts           URL, token y modo demo en el dispositivo
+src/store/settings.ts           URL y modo demo en el dispositivo
 src/store/auth.ts               Identidad de la cuenta iniciada en el dispositivo
 src/hooks/useData.ts             Caché, estados y mutaciones
 src/lib/analytics.ts            Analítica sin dependencias de React
@@ -168,11 +164,11 @@ tests/                         Pruebas automatizadas
 
 ### Cuentas de usuario
 
-Desde `Drip_API:V:0.0.0.02` Drip admite varias personas en el mismo libro. Antes de ver tus registros, la app pide la URL y el token (si el dispositivo no los tiene guardados) y luego un formulario de **Ingresar o Registrarse** con nombre, correo y contraseña. El modo demo omite este paso por completo.
+Desde `Drip_API:V:0.0.0.03` Drip admite varias personas en el mismo libro, sin token de dispositivo. Antes de ver tus registros, la app muestra un formulario de **Ingresar o Registrarse** con correo y contraseña (y nombre al registrarte); la URL de Apps Script ya viene de `VITE_APPS_SCRIPT_URL`. El modo demo omite este paso por completo.
 
 La contraseña exige más de 8 caracteres alfanuméricos más un carácter especial; el formulario no permite campos vacíos. El cliente valida lo mismo que el backend antes de enviar la solicitud. La sesión iniciada se guarda únicamente en este dispositivo (`localStorage`) y puedes cerrarla desde **Más → Ajustes → Tu cuenta**; cerrar sesión no borra movimientos ni la conexión guardada.
 
-Cada movimiento nuevo queda asociado al `usuario_id` de quien lo creó. Categorías, deudas, recurrentes y configuración se mantienen compartidas entre todas las cuentas del libro, igual que antes.
+Cada movimiento nuevo queda asociado al `usuario_id` de quien lo creó. Categorías, deudas, recurrentes y configuración se mantienen compartidas entre todas las cuentas del libro, igual que antes. La pantalla de ingreso muestra una ilustración animada en `<canvas>` (`src/components/NeuralCanvas.tsx`) con tres grupos de nodos — un cerebro, una moneda y una billetera — conectados como neuronas; respeta `prefers-reduced-motion` y se adapta de una columna (móvil) a dos columnas (escritorio, desde 860px).
 
 ### Uso diario
 
@@ -192,7 +188,7 @@ El cliente envía las operaciones en lotes acotados y conserva la cola hasta rec
 
 Las categorías, deudas, plantillas y configuración requieren conexión en modo real. La cola offline está destinada a movimientos; el modo demo permite editar todo localmente. Las plantillas se materializan mediante la acción explícita de generar pagos vencidos. No se instala un disparador periódico en Apps Script. La clave `recurrente_id + fecha` evita duplicaciones, incluso si un pago generado se borró lógicamente.
 
-Cada combinación de conexión tiene su caché separada. Cambiar la URL o el token no envía silenciosamente registros del libro anterior al nuevo. Si capturaste registros antes de configurar la conexión, usa la opción de **importar registros locales** disponible en Ajustes. El modo demo nunca se importa. No borres el almacenamiento de Safari mientras haya cambios pendientes; el CSV exporta los movimientos que están en el dispositivo.
+Cada combinación de conexión tiene su caché separada. Cambiar la URL no envía silenciosamente registros del libro anterior al nuevo. Si capturaste registros antes de configurar la conexión, usa la opción de **importar registros locales** disponible en Ajustes. El modo demo nunca se importa. No borres el almacenamiento de Safari mientras haya cambios pendientes; el CSV exporta los movimientos que están en el dispositivo.
 
 El service worker precachea la aplicación y usa `stale-while-revalidate` para recursos estáticos del mismo origen. No cachea peticiones `POST` a Apps Script. Los avisos de actualización permiten recargar cuando corresponde. El registro utiliza la integración de vite-plugin-pwa. [Documentación del registro del service worker](https://vite-pwa-org.netlify.app/guide/register-service-worker).
 
@@ -245,41 +241,38 @@ Después de prepararlo, el botón de compartir solicita la hoja nativa con el ar
 
 La exportación CSV incluye todos los movimientos no eliminados del conjunto abierto, escapado de comillas, BOM UTF-8 y neutralización de fórmulas. Los datos del informe no se envían a servicios externos para generarlo.
 
-## 5. Desplegar el frontend en GitHub Pages
+## 5. Desplegar el frontend
+
+La app se sirve siempre desde la raíz del dominio (`base: "/"` fijo en `vite.config.ts`); no hay variable de subruta. Desplígala en un dominio o subdominio propio (GitHub Pages de usuario/organización, un dominio personalizado, Vercel o Netlify), no como página de proyecto en una subruta.
 
 1. Crea un repositorio y sube este proyecto a su rama `main`. Incluye `package-lock.json`.
 2. En **Settings → Pages → Source**, selecciona **GitHub Actions**.
-3. En **Settings → Secrets and variables → Actions → Variables**, crea:
-
-   | Variable | Ejemplo |
-   | --- | --- |
-   | `VITE_APPS_SCRIPT_URL` | `https://script.google.com/macros/s/XXXXXXXX/exec` |
-   | `VITE_BASE_PATH` | `/NOMBRE-DEL-REPO/` |
-
+3. En **Settings → Secrets and variables → Actions → Variables**, crea `VITE_APPS_SCRIPT_URL` con la URL `/exec` de tu implementación.
 4. El workflow ejecuta checkout, Node 20, `npm ci`, pruebas, build, carga del artefacto `dist` y despliegue. También admite ejecución manual.
-5. Abre `https://USUARIO.github.io/NOMBRE-DEL-REPO/`. Para un repositorio raíz `USUARIO.github.io` o un dominio propio en raíz, configura explícitamente `VITE_BASE_PATH=/`.
-6. En Safari del iPhone: **Compartir → Añadir a pantalla de inicio**. Abre Drip desde el nuevo ícono y guarda la conexión y el token en Ajustes.
+5. Abre la URL raíz de tu sitio (por ejemplo `https://USUARIO.github.io/` o tu dominio propio).
+6. En Safari del iPhone: **Compartir → Añadir a pantalla de inicio**. Abre Drip desde el nuevo ícono e inicia sesión con tu correo y contraseña.
 
-`HashRouter` evita que la navegación interna requiera reescrituras del servidor. El manifest, íconos, `start_url`, `scope` y recursos se construyen con la base configurada. El manifest usa `display: standalone`; `index.html` contiene las etiquetas de Apple y `viewport-fit=cover`. Las fuentes están incluidas en los recursos, sin peticiones a Google Fonts.
+`HashRouter` evita que la navegación interna requiera reescrituras del servidor. El manifest, íconos, `start_url`, `scope` y recursos apuntan a la raíz. El manifest usa `display: standalone`; `index.html` contiene las etiquetas de Apple y `viewport-fit=cover`. Las fuentes están incluidas en los recursos, sin peticiones a Google Fonts.
 
 No se ha creado un repositorio remoto ni una implementación de Google por ti: los valores de tu cuenta deben configurarse con los pasos anteriores.
 
 ## 6. Seguridad y solución de problemas
 
-El token es una credencial compartida y queda guardado en `localStorage` del dispositivo. El sitio desplegado es público; el token autentica el acceso a los datos. Además del token, cada persona tiene su propia contraseña: el backend la guarda como `password_hash` (SHA-256 con una `salt` aleatoria por cuenta), nunca en texto plano, y la API jamás devuelve el hash ni la sal. No hay registro de información financiera en consola, trackers ni analítica de terceros. Protege el acceso al dispositivo y cambia el token en Apps Script y los dispositivos cuando necesites revocarlo.
+**Desde `Drip_API:V:0.0.0.03` ya no existe un token de dispositivo.** El Web App de Apps Script sigue publicado con acceso “Cualquier usuario”, por lo que cualquier persona que conozca la URL `/exec` puede llamar a `list`, `upsert`, `batch` y demás acciones sin autenticarse; `register`/`login` identifican a quien escribe cada movimiento (`usuario_id`), pero no restringen quién puede leer o escribir en el libro. Esta es una decisión deliberada mientras el proyecto se mantiene como sitio web de uso personal/en pareja; no publiques la URL de tu implementación si quieres mantener los datos privados, y evalúa restaurar un control de acceso a nivel de red (por ejemplo, Workspace) antes de compartirla ampliamente.
+
+Cada persona tiene su propia contraseña: el backend la guarda como `password_hash` (SHA-256 con una `salt` aleatoria por cuenta), nunca en texto plano, y la API jamás devuelve el hash ni la sal. No hay registro de información financiera en consola, trackers ni analítica de terceros.
 
 | Síntoma | Comprobación |
 | --- | --- |
-| `UNAUTHORIZED` (conexión) | El token guardado debe ser idéntico al configurado en la versión desplegada de Apps Script. |
 | `UNAUTHORIZED` (ingresar) | Correo o contraseña incorrectos; el mensaje no confirma si la cuenta existe. |
 | `DUPLICATE_USER` | Ya existe una cuenta con ese correo en `Usuarios`; usa Ingresar en lugar de Registrarte. |
-| `SERVER_NOT_CONFIGURED` | Cambia los marcadores del ID y token en Apps Script y despliega una nueva versión. |
+| `SERVER_NOT_CONFIGURED` | Configura `SPREADSHEET_ID` en Apps Script y despliega una nueva versión. |
 | Respuesta HTML / error de red | Usa `/exec`, acceso “Cualquier usuario” y ejecuta como tu cuenta. Algunas políticas de Workspace restringen esa opción. |
 | `SCHEMA_MISMATCH` | Restablece los encabezados y su orden. No renombres columnas existentes. |
 | `CLOCK_SKEW` | Activa fecha y hora automáticas en el dispositivo y vuelve a sincronizar. |
 | Cambios pendientes | Reabre con conexión o usa sincronización manual. Mantén el almacenamiento del navegador. |
 | Datos no visibles tras cambiar conexión | Cada conexión tiene una caché separada; vuelve a la conexión anterior o usa importación local si esos registros nunca estuvieron conectados. |
-| Íconos o recursos 404 | Comprueba `VITE_BASE_PATH`, vuelve a construir y actualiza la app instalada. |
+| Íconos o recursos 404 | Vuelve a construir y actualiza la app instalada; la base ahora es siempre `/`. |
 | PDF no comparte archivos | Descarga el PDF o usa los accesos de resumen en texto. La capacidad depende del navegador. |
 
 ## 7. Checklist de aceptación
@@ -298,8 +291,8 @@ Este estado separa código disponible de validación en servicios y dispositivos
 | PDF local, descarga y Web Share con alternativas | Implementado; hoja nativa y adjuntos en iPhone pendientes de verificar |
 | Tema claro y diseño para 390 × 844 | Implementado; comprobación final en dispositivo real pendiente |
 | Backend único con constantes requeridas | `backend/Code.gs`, sin archivos backend adicionales |
-| Sin secretos en el repositorio | Solo marcadores; el token real se ingresa en Apps Script y Ajustes |
-| Cuentas por correo/contraseña y atribución por `usuario_id` | Implementado en `Drip_API:V:0.0.0.02`; migración automática de hojas `V:0.0.0.01` |
+| Sin secretos en el repositorio | Sin tokens ni marcadores de credenciales; las cuentas se crean desde la app |
+| Cuentas por correo/contraseña y atribución por `usuario_id` | Implementado en `Drip_API:V:0.0.0.03`, sin token de dispositivo; migración automática de hojas `V:0.0.0.01`/`V:0.0.0.02` |
 | Interfaz responsiva en móvil y computador sin rediseño | Implementado con el marco centrado existente (`@media (min-width: 431px)`) |
 
 Antes del uso diario, registra un gasto real pequeño, comprueba la fila en Sheets, edítalo, elimínalo, repite una captura en modo avión, recupera conexión y confirma que queda una sola fila por UUID. Después verifica un PDF y su adjunto desde la app instalada en el iPhone.

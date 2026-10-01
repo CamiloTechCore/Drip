@@ -17,7 +17,7 @@ function readUser(): Usuario | null {
 let current = readUser();
 export const getUser = (): Usuario | null => current;
 
-/** The signed-in identity stays on this device, separate from the shared connection token. */
+/** The signed-in identity stays on this device, separate from the connection URL. */
 export function setUser(user: Usuario | null): void {
   if (user) localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
   else localStorage.removeItem(STORAGE_KEY);

@@ -1,16 +1,13 @@
 const SPREADSHEET_ID = '1Qzzvv2ObVMYdN9rQRSHYEwEdhlfKH262nM0trH4YBpY'; /*NO MODIFICAR*/
 const SHEET_NAME = 'Registros';
-const API_TOKEN = 'CAMBIA_ESTE_TOKEN_LARGO'; // Reemplazar SOLO en Apps Script, mínimo 24 caracteres.
 const TIMEZONE = 'America/Bogota';
-const API_VERSION = 'Drip_API:V:0.0.0.02'; // V:0.0.0.01 no tenía Usuarios ni usuario_id en Registros.
+const API_VERSION = 'Drip_API:V:0.0.0.03'; // V:0.0.0.02 todavía exigía un token de dispositivo compartido.
 
 /* Drip — Daily Records for Individuals & Partners.
  * Único archivo del backend. Publicar como Web App: ejecutar como Yo,
- * acceso Cualquier usuario. El token del dispositivo autentica todos los POST.
- * Los intereses son porcentajes: tasa_interes_mensual = 2 significa 2 %.
- * Desde V:0.0.0.02 el libro admite varios usuarios: el token sigue siendo el
- * acceso compartido del dispositivo y cada persona además inicia sesión con
- * su correo y contraseña, guardados y validados únicamente en Usuarios.
+ * acceso Cualquier usuario. Los intereses son porcentajes: tasa_interes_mensual = 2 significa 2 %.
+ * Desde V:0.0.0.03 ya no existe un token de dispositivo: cada persona se
+ * identifica únicamente con su correo y contraseña, guardados y validados en Usuarios.
  */
 const HEADERS_ = {
   registros: ['id', 'fecha', 'tipo', 'subtipo', 'monto', 'categoria', 'tags', 'descripcion', 'metodo_pago', 'necesidad', 'recurrente_id', 'deuda_id', 'creado_en', 'actualizado_en', 'eliminado', 'usuario_id'],
@@ -52,8 +49,6 @@ function doPost(e) {
     let p;
     try { p = JSON.parse(e.postData.contents); } catch (err) { throw apiError_('BAD_JSON', 'El cuerpo debe ser JSON válido.'); }
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw apiError_('BAD_REQUEST', 'La petición debe ser un objeto.');
-    if (API_TOKEN.length < 24 || API_TOKEN === 'CAMBIA_ESTE_TOKEN_LARGO') throw apiError_('SERVER_NOT_CONFIGURED', 'Configura un token aleatorio de al menos 24 caracteres en Apps Script.');
-    if (typeof p.token !== 'string' || !sameToken_(p.token, API_TOKEN)) return fail_('UNAUTHORIZED', 'Token de acceso incorrecto.');
     const handlers = { list: handleList_, upsert: handleUpsert_, batch: handleBatch_, delete: handleDelete_, saveEntity: handleSaveEntity_, saveConfig: handleSaveConfig_, materializeRecurrentes: handleMaterialize_, register: handleRegister_, login: handleLogin_ };
     if (!Object.prototype.hasOwnProperty.call(handlers, p.action)) throw apiError_('UNKNOWN_ACTION', 'Acción no reconocida.');
     // También bloqueamos las lecturas: esquema, semillas y cursor consistente
@@ -64,7 +59,7 @@ function doPost(e) {
     ensureSchema_();
     return ok_(handlers[p.action](p));
   } catch (err) {
-    // No devolvemos stacks, IDs de la hoja, tokens ni errores internos de Google.
+    // No devolvemos stacks, IDs de la hoja ni errores internos de Google.
     return fail_(err.apiCode || 'SERVER_ERROR', err.apiCode ? err.message : 'No se pudo completar la operación. Reintenta en un momento.');
   } finally { if (acquired && lock) lock.releaseLock(); }
 }

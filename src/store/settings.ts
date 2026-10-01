@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-export interface Settings { url: string; token: string; isDemo: boolean }
+export interface Settings { url: string; isDemo: boolean }
 const STORAGE_KEY = 'drip:settings:v1';
 const listeners = new Set<() => void>();
 const environmentUrl = import.meta.env.VITE_APPS_SCRIPT_URL ?? '';
@@ -9,18 +9,17 @@ function readSettings(): Settings {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
     const stored = value && typeof value === 'object' ? value as Partial<Settings> : {};
-    return { url: typeof stored.url === 'string' ? stored.url : environmentUrl, token: typeof stored.token === 'string' ? stored.token : '', isDemo: stored.isDemo === true };
-  } catch { return { url: environmentUrl, token: '', isDemo: false }; }
+    return { url: typeof stored.url === 'string' ? stored.url : environmentUrl, isDemo: stored.isDemo === true };
+  } catch { return { url: environmentUrl, isDemo: false }; }
 }
 
 let current = readSettings();
 export const getSettings = (): Settings => current;
 
-/** The shared token stays on this device; it is never part of an environment variable. */
+/** The connection URL comes from VITE_APPS_SCRIPT_URL; only isDemo is user-editable here. */
 export function setSettings(next: Partial<Settings>): void {
   const candidate = { ...current, ...next };
   candidate.url = candidate.url.trim();
-  candidate.token = candidate.token.trim();
   // Persist before publishing: callers can report blocked browser storage accurately.
   localStorage.setItem(STORAGE_KEY, JSON.stringify(candidate));
   current = candidate;

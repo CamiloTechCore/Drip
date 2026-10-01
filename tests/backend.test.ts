@@ -44,13 +44,10 @@ function harness() {
   let rangeValidations = 0;
   const sheets = new Map<string, Sheet>();
   const properties = new Map<string, string>();
-  const token = 'test-placeholder-'.repeat(3);
   const rule = { requireValueInList: () => rule, requireValueInRange: () => { rangeValidations++; return rule; }, setAllowInvalid: () => rule, requireCheckbox: () => rule, build: () => ({}) };
   const source = readFileSync(new URL('../backend/Code.gs', import.meta.url), 'utf8')
-    // Substitute declarations only in memory; configured user constants remain
-    // untouched on disk, and guards still exercise the production behavior.
-    .replace(/^const SPREADSHEET_ID = '[^']*';/m, "const SPREADSHEET_ID = 'test-sheet-id';")
-    .replace(/^const API_TOKEN = '[^']*';/m, `const API_TOKEN = ${JSON.stringify(token)};`);
+    // Substitute declarations only in memory; configured user constants remain untouched on disk.
+    .replace(/^const SPREADSHEET_ID = '[^']*';/m, "const SPREADSHEET_ID = 'test-sheet-id';");
   const output = (value: string) => ({ value, setMimeType() { return this; } });
   const context = createContext({
     Date, Math, JSON,
@@ -75,8 +72,8 @@ function harness() {
   runInContext(source, context);
   return {
     sheets,
-    post<T>(request: object, suppliedToken = token): Envelope<T> {
-      context.request_ = { postData: { contents: JSON.stringify({ token: suppliedToken, ...request }) } };
+    post<T>(request: object): Envelope<T> {
+      context.request_ = { postData: { contents: JSON.stringify(request) } };
       const result = runInContext('doPost(request_)', context) as { value: string };
       expect(held).toBe(false);
       return JSON.parse(result.value) as Envelope<T>;
@@ -99,10 +96,10 @@ describe('single-file Apps Script API', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-30T20:00:00.000Z')); });
   afterEach(() => vi.useRealTimers());
 
-  it('keeps health public and rejects bad tokens before opening or writing the sheet', () => {
+  it('keeps health public and rejects unknown actions before opening or writing the sheet', () => {
     const api = harness();
-    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.02' });
-    expect(api.post({ action: 'list' }, 'invalid').error).toBe('UNAUTHORIZED');
+    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.03' });
+    expect(api.post({ action: 'not-a-real-action' }).error).toBe('UNKNOWN_ACTION');
     expect(api.sheets.size).toBe(0);
     expect(api.lockCount).toBe(0);
   });

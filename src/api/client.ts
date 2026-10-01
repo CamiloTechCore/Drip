@@ -31,10 +31,9 @@ function clone<T>(value: T): T { return structuredClone(value); }
 
 export async function getAccount(settings: Settings): Promise<Account> {
   if (settings.isDemo) return { settings: { ...settings }, namespace: 'demo-v1' };
-  const identity = JSON.stringify([settings.url, settings.token]);
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity));
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(settings.url));
   const namespace = [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('');
-  if (!settings.url || !settings.token) await update<string[]>(LOCAL_INDEX, stored => [...new Set([...(stored ?? []), namespace])]);
+  if (!settings.url) await update<string[]>(LOCAL_INDEX, stored => [...new Set([...(stored ?? []), namespace])]);
   return { settings: { ...settings }, namespace };
 }
 
@@ -113,7 +112,7 @@ export async function deleteRegistro(account: Account, id: string): Promise<void
 }
 
 function assertConnection(account: Account): void {
-  if (!account.settings.url || !account.settings.token) throw new Error('Configura la URL y el token en Más → Ajustes. Tus movimientos quedan guardados en este dispositivo.');
+  if (!account.settings.url) throw new Error('Configura la URL de Apps Script en Más → Ajustes. Tus movimientos quedan guardados en este dispositivo.');
   let url: URL;
   try { url = new URL(account.settings.url); } catch { throw new Error('La URL de Apps Script no es válida.'); }
   if (url.protocol !== 'https:' || url.hostname !== 'script.google.com' || !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname)) throw new Error('Usa la URL HTTPS /exec de la implementación de Google Apps Script.');
@@ -130,15 +129,13 @@ export async function request<T>(account: Account, payload: Record<string, unkno
       const response = await fetch(account.settings.url, {
         method: 'POST', redirect: 'follow', credentials: 'omit', signal: controller.signal,
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ ...payload, token: account.settings.token }),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error('El servicio no respondió. Comprueba la implementación de Apps Script.');
       const result: ApiResponse<T> = await response.json() as ApiResponse<T>;
       if (!result || typeof result.ok !== 'boolean') throw new Error('La implementación no devolvió JSON válido. Revisa el acceso para cualquier usuario.');
       if (!result.ok) {
-        const message = result.error === 'UNAUTHORIZED' && payload.action !== 'login'
-          ? 'El token de acceso es incorrecto. Revísalo en Ajustes.'
-          : result.message || `El servidor rechazó la operación (${result.error}).`;
+        const message = result.message || `El servidor rechazó la operación (${result.error}).`;
         // Validation and authorization failures are not transient.
         const error = new Error(message); error.name = 'ApiError'; throw error;
       }
@@ -295,7 +292,7 @@ export async function materialize(account: Account, through = today()): Promise<
 
 /** Explicit, repeat-safe transfer from never-connected local stores; existing target IDs win. */
 export async function importLocalRecords(account: Account): Promise<number> {
-  if (account.settings.isDemo || !account.settings.url || !account.settings.token) throw new Error('Guarda primero la conexión y desactiva el modo demo para importar.');
+  if (account.settings.isDemo || !account.settings.url) throw new Error('Guarda primero la conexión y desactiva el modo demo para importar.');
   const namespaces = await get<string[]>(LOCAL_INDEX) ?? [];
   const sources: Registro[] = [];
   for (const namespace of namespaces) {
