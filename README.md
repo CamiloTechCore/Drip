@@ -4,7 +4,7 @@
 
 Drip es una PWA en español, de tema claro, diseñada para iPhone 13 (390 × 844). Registra movimientos en Google Sheets mediante un único archivo de Google Apps Script, permite capturar gastos sin conexión y convierte el historial en ciclos, alertas y hábitos de ahorro.
 
-Se usa un **libro compartido privado**: quienes conocen la URL y el token acceden al mismo conjunto de datos. No hay cuentas de usuario, roles ni atribución individual. Puedes usar tags como `personal`, `en pareja` o `hogar`; no representan identidades verificadas. No hay integración bancaria ni publicación en App Store.
+Se usa un **libro compartido privado**: quienes conocen la URL y el token acceden al mismo conjunto de datos. Desde `Drip_API:V:0.0.0.02` cada persona además inicia sesión con su propio correo y contraseña; el token sigue siendo el acceso compartido del dispositivo/implementación, y la cuenta identifica quién creó cada movimiento mediante `usuario_id`. Puedes usar tags como `personal`, `en pareja` o `hogar`; no representan identidades verificadas, pero ahora se complementan con la cuenta de quien registra. No hay integración bancaria ni publicación en App Store.
 
 ## 1. Backend: un único `Code.gs`
 
@@ -24,14 +24,14 @@ El backend completo está en [`backend/Code.gs`](backend/Code.gs). No requiere a
    ```
 
 4. Reemplaza el marcador de `API_TOKEN` por un secreto aleatorio de al menos 24 caracteres, generado con tu gestor de contraseñas. Conserva el archivo del repositorio con su marcador; el secreto real va únicamente en Apps Script y en los ajustes del dispositivo.
-5. Ejecuta `setup()` desde el editor y autoriza sus permisos. Se crean las pestañas, encabezados, formatos, listas desplegables y categorías iniciales.
+5. Ejecuta `setup()` desde el editor y autoriza sus permisos. Se crean las pestañas, encabezados, formatos, listas desplegables, categorías iniciales y la hoja `Usuarios`.
 6. Selecciona **Implementar → Nueva implementación → Aplicación web**. Configura **Ejecutar como: Yo** y **Quién tiene acceso: Cualquier usuario**.
-7. Copia la URL terminada en `/exec`. Puedes abrirla para comprobar `{"ok":true,"service":"finanzas"}`. La prueba de vida no revela datos ni requiere token.
-8. En Drip abre **Más → Ajustes**, pega la URL y el mismo token, guarda y sincroniza.
+7. Copia la URL terminada en `/exec`. Puedes abrirla para comprobar `{"ok":true,"service":"finanzas","version":"Drip_API:V:0.0.0.02"}`. La prueba de vida no revela datos ni requiere token.
+8. En Drip, la primera pantalla pide la URL y el token (si no están guardados) y luego el correo y la contraseña para ingresar o registrarte.
 
 Cada modificación del backend requiere editar la implementación y seleccionar **Nueva versión**. Reutilizar la implementación mantiene su URL. La URL `/dev` del editor no sirve como conexión de producción.
 
-`setup()` es repetible y no borra movimientos. El backend comprueba los encabezados y devuelve `SCHEMA_MISMATCH` si su orden fue modificado; conserva los nombres y el orden de las columnas. No compartas públicamente el Sheet: el script accede mediante tu cuenta.
+`setup()` es repetible y no borra movimientos ni usuarios. El backend comprueba los encabezados y devuelve `SCHEMA_MISMATCH` si su orden fue modificado; conserva los nombres y el orden de las columnas. Una hoja `Registros` creada con `Drip_API:V:0.0.0.01` se actualiza automáticamente agregando la columna `usuario_id` al ejecutar `setup()` o la primera petición; no es necesario recrear la pestaña. No compartas públicamente el Sheet: el script accede mediante tu cuenta.
 
 ### Contrato HTTP
 
@@ -65,6 +65,10 @@ Las operaciones usan `POST` con JSON en el cuerpo y `Content-Type: text/plain;ch
 | `saveEntity` | `entity: "categoria" | "deuda" | "recurrente"`, `data` | Entidad validada |
 | `saveConfig` | `config` | Configuración validada |
 | `materializeRecurrentes` | Sin parámetros adicionales | Pagos vencidos generados, plantillas actualizadas y `pending` |
+| `register` | `nombre`, `correo`, `password` | Cuenta creada en `Usuarios`; retorna `id`, `nombre`, `correo` (nunca el hash ni la sal) |
+| `login` | `correo`, `password` | Cuenta autenticada; retorna `id`, `nombre`, `correo` |
+
+El token sigue siendo obligatorio en `register` y `login`: autentica el dispositivo/implementación, mientras que el correo y la contraseña identifican a la persona dentro del libro compartido. La contraseña exige más de 8 caracteres alfanuméricos más un carácter especial, validado tanto en el cliente como en el servidor. Los errores de `login` usan siempre el mismo mensaje genérico para no confirmar si un correo existe.
 
 Las respuestas siguen `{ok:true,data:…}` o `{ok:false,error:"CODIGO",message:"…"}`. `doGet` es la única excepción de forma: responde directamente con `ok` y `service`. No se confía en el código HTTP para distinguir errores de aplicación.
 
@@ -74,11 +78,14 @@ Todas las escrituras están protegidas con `LockService.getScriptLock().waitLock
 
 | Pestaña | Columnas en orden |
 | --- | --- |
-| `Registros` | `id · fecha · tipo · subtipo · monto · categoria · tags · descripcion · metodo_pago · necesidad · recurrente_id · deuda_id · creado_en · actualizado_en · eliminado` |
+| `Registros` | `id · fecha · tipo · subtipo · monto · categoria · tags · descripcion · metodo_pago · necesidad · recurrente_id · deuda_id · creado_en · actualizado_en · eliminado · usuario_id` |
 | `Categorias` | `id · nombre · tipo · color · icono · presupuesto_mensual · activa` |
 | `Deudas` | `id · nombre · acreedor · monto_inicial · tasa_interes_mensual · fecha_inicio · cuota_minima · dia_pago · activa` |
 | `Recurrentes` | `id · descripcion · monto · categoria · tags · frecuencia · dia · proximo_pago · metodo_pago · activa` |
 | `Config` | `clave · valor` |
+| `Usuarios` | `id · nombre · correo · password_hash · salt · creado_en` |
+
+`usuario_id` identifica quién creó cada movimiento; queda vacío en registros antiguos o si el cliente no envía una sesión iniciada. Categorías, deudas, recurrentes y configuración se mantienen compartidas entre todas las personas del libro, igual que antes. La hoja `Usuarios` solo expone `id`, `nombre` y `correo` por API; `password_hash` y `salt` nunca salen del Sheet.
 
 Fechas: `YYYY-MM-DD`; fechas de creación/actualización: ISO con zona UTC. Los importes son positivos; `tipo` determina su interpretación. `sin_gasto` siempre tiene monto cero. Los tipos son `ingreso`, `gasto`, `deuda_aumento`, `deuda_pago` y `sin_gasto`. Los subtipos son `sueldo`/`adicional` para ingresos y `variable`/`fijo` para gastos. Los demás tipos usan subtipo vacío.
 
@@ -143,7 +150,9 @@ src/App.tsx                     Estructura, navegación y avisos
 src/router.tsx                  Rutas hash compatibles con Pages
 src/types.ts                    Modelo compartido del cliente
 src/api/client.ts               HTTP, IndexedDB, cola y sincronización
+src/api/validation.ts           Validación de registros, entidades y credenciales
 src/store/settings.ts           URL, token y modo demo en el dispositivo
+src/store/auth.ts               Identidad de la cuenta iniciada en el dispositivo
 src/hooks/useData.ts             Caché, estados y mutaciones
 src/lib/analytics.ts            Analítica sin dependencias de React
 src/lib/defaults.ts             Configuración y categorías iniciales
@@ -152,10 +161,18 @@ src/lib/pdf.ts                  PDF con tablas y barras
 src/lib/share.ts                Compartir, descargar y exportar CSV
 src/lib/format.ts               Moneda y fechas
 src/components/                Componentes reutilizables
-src/pages/                     Inicio, Movimientos, Agregar, Análisis y Más
+src/pages/                     Inicio, Movimientos, Agregar, Análisis, Más y Login
 tests/                         Pruebas automatizadas
 .github/workflows/deploy.yml    Pruebas, build y GitHub Pages
 ```
+
+### Cuentas de usuario
+
+Desde `Drip_API:V:0.0.0.02` Drip admite varias personas en el mismo libro. Antes de ver tus registros, la app pide la URL y el token (si el dispositivo no los tiene guardados) y luego un formulario de **Ingresar o Registrarse** con nombre, correo y contraseña. El modo demo omite este paso por completo.
+
+La contraseña exige más de 8 caracteres alfanuméricos más un carácter especial; el formulario no permite campos vacíos. El cliente valida lo mismo que el backend antes de enviar la solicitud. La sesión iniciada se guarda únicamente en este dispositivo (`localStorage`) y puedes cerrarla desde **Más → Ajustes → Tu cuenta**; cerrar sesión no borra movimientos ni la conexión guardada.
+
+Cada movimiento nuevo queda asociado al `usuario_id` de quien lo creó. Categorías, deudas, recurrentes y configuración se mantienen compartidas entre todas las cuentas del libro, igual que antes.
 
 ### Uso diario
 
@@ -165,7 +182,7 @@ tests/                         Pruebas automatizadas
 - **Análisis:** ingresos/gastos/ahorro, ingresos por origen, categorías y presupuestos, tags, hormiga, repetidos, innecesarios, deuda, ciclos, patrones diarios y pagos próximos.
 - **Más:** deudas, recurrentes, categorías, ajustes, CSV, sincronización y explicación del producto.
 
-Los controles respetan áreas seguras del dispositivo, objetivos táctiles amplios y movimiento reducido. Las gráficas tienen descripciones accesibles; la interfaz permanece en tema claro. La distribución se concentra en el ancho de un iPhone; no se ofrece una experiencia específica para escritorio/tablet.
+Los controles respetan áreas seguras del dispositivo, objetivos táctiles amplios y movimiento reducido. Las gráficas tienen descripciones accesibles; la interfaz permanece en tema claro. El diseño es mobile-first: en pantallas de computador el marco de la app se mantiene centrado con un ancho máximo (`@media (min-width: 431px)` en `src/styles.css`), sin rediseñar componentes ni cambiar el estilo existente.
 
 ### Datos offline y sincronización
 
@@ -216,7 +233,9 @@ npm test
 npm test -- tests/analytics.test.ts
 ```
 
-Las **23 pruebas de analítica** verifican extremos de fechas, años bisiestos, cortes a fin de mes, sueldos duplicados, ciclos forzados, proyecciones, borrados, hormiga por ambas reglas sin doble conteo, periodos comparables, denominador cero, agregaciones, deuda cronológica, pagos superiores al saldo, amortización imposible, rachas y semanas completas, calendario y aislamiento de demo. Estas 23 pruebas se ejecutaron correctamente durante la implementación. La suite general también incluye las verificaciones de los demás módulos que aparecen en `tests/`.
+Las **24 pruebas de analítica** verifican el día de Bogotá al cambiar la fecha UTC, extremos de fechas, años bisiestos, cortes a fin de mes, sueldos duplicados, ciclos forzados, proyecciones, borrados, hormiga por ambas reglas sin doble conteo, periodos comparables, denominador cero, agregaciones, deuda cronológica, pagos superiores al saldo, amortización imposible, rachas y semanas completas, calendario y aislamiento de demo. Estas 24 pruebas se ejecutaron correctamente durante la implementación. La suite general también incluye las verificaciones de los demás módulos que aparecen en `tests/`.
+
+Las **19 pruebas de datos y exportación** en `src/api/client.test.ts` y `src/lib/share.test.ts` se ejecutaron correctamente: cubren escrituras simultáneas persistentes, aislamiento entre conexiones, importación local, reintentos idempotentes, cambios durante sincronización, compactación antes de dividir lotes, borrados, renombrado de categorías, validación offline, recurrentes en demo, CSV seguro y generación del PDF. Se generó además un resumen demo de tres páginas con el mismo código de la aplicación y se inspeccionaron sus tres páginas renderizadas: totales, barras, tablas, saltos de página y detalle legibles, sin solapamientos.
 
 ## 4. Compartir PDF y CSV
 
@@ -247,11 +266,13 @@ No se ha creado un repositorio remoto ni una implementación de Google por ti: l
 
 ## 6. Seguridad y solución de problemas
 
-El token es una credencial compartida y queda guardado en `localStorage` del dispositivo. El sitio desplegado es público; el token autentica el acceso a los datos. No hay registro de información financiera en consola, trackers ni analítica de terceros. Protege el acceso al dispositivo y cambia el token en Apps Script y los dispositivos cuando necesites revocarlo.
+El token es una credencial compartida y queda guardado en `localStorage` del dispositivo. El sitio desplegado es público; el token autentica el acceso a los datos. Además del token, cada persona tiene su propia contraseña: el backend la guarda como `password_hash` (SHA-256 con una `salt` aleatoria por cuenta), nunca en texto plano, y la API jamás devuelve el hash ni la sal. No hay registro de información financiera en consola, trackers ni analítica de terceros. Protege el acceso al dispositivo y cambia el token en Apps Script y los dispositivos cuando necesites revocarlo.
 
 | Síntoma | Comprobación |
 | --- | --- |
-| `UNAUTHORIZED` | El token guardado debe ser idéntico al configurado en la versión desplegada de Apps Script. |
+| `UNAUTHORIZED` (conexión) | El token guardado debe ser idéntico al configurado en la versión desplegada de Apps Script. |
+| `UNAUTHORIZED` (ingresar) | Correo o contraseña incorrectos; el mensaje no confirma si la cuenta existe. |
+| `DUPLICATE_USER` | Ya existe una cuenta con ese correo en `Usuarios`; usa Ingresar en lugar de Registrarte. |
 | `SERVER_NOT_CONFIGURED` | Cambia los marcadores del ID y token en Apps Script y despliega una nueva versión. |
 | Respuesta HTML / error de red | Usa `/exec`, acceso “Cualquier usuario” y ejecuta como tu cuenta. Algunas políticas de Workspace restringen esa opción. |
 | `SCHEMA_MISMATCH` | Restablece los encabezados y su orden. No renombres columnas existentes. |
@@ -273,10 +294,12 @@ Este estado separa código disponible de validación en servicios y dispositivos
 | Sueldos, ingresos extra, fijos y deuda en gráficas | Implementado; demo local explícito para revisar |
 | Categorías, tags, edición y filtros | Implementado; escritura real requiere tu conexión |
 | Ciclos, hormiga, repetidos, crecimiento y deuda | Implementado y cubierto por pruebas de analítica |
-| Rachas correctas y pruebas unitarias | 23 pruebas de analítica ejecutadas correctamente |
+| Rachas correctas y pruebas unitarias | 24 pruebas de analítica ejecutadas correctamente |
 | PDF local, descarga y Web Share con alternativas | Implementado; hoja nativa y adjuntos en iPhone pendientes de verificar |
 | Tema claro y diseño para 390 × 844 | Implementado; comprobación final en dispositivo real pendiente |
 | Backend único con constantes requeridas | `backend/Code.gs`, sin archivos backend adicionales |
 | Sin secretos en el repositorio | Solo marcadores; el token real se ingresa en Apps Script y Ajustes |
+| Cuentas por correo/contraseña y atribución por `usuario_id` | Implementado en `Drip_API:V:0.0.0.02`; migración automática de hojas `V:0.0.0.01` |
+| Interfaz responsiva en móvil y computador sin rediseño | Implementado con el marco centrado existente (`@media (min-width: 431px)`) |
 
 Antes del uso diario, registra un gasto real pequeño, comprueba la fila en Sheets, edítalo, elimínalo, repite una captura en modo avión, recupera conexión y confirma que queda una sola fila por UUID. Después verifica un PDF y su adjunto desde la app instalada en el iPhone.

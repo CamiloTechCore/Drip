@@ -1,6 +1,346 @@
-import { useState,type FormEvent } from 'react';
-import { useDrip } from '../context';
-import { todayISO } from '../lib/analytics';
-import { Sheet,categoryIcons } from './ui';
-import type { Categoria,Deuda,Entity,EntityName,Metodo,Recurrente } from '../types';
-export default function EntityEditor({entity,value,onClose}:{entity:EntityName;value?:Entity;onClose:()=>void}){const {data,saveEntity,toast}=useDrip();const [error,setError]=useState('');const [busy,setBusy]=useState(false);const category=value as Categoria|undefined;const debt=value as Deuda|undefined;const recurring=value as Recurrente|undefined;const [color,setColor]=useState(category?.color??'#615BEA');async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError('');const f=new FormData(e.currentTarget);const str=(k:string)=>String(f.get(k)??'').trim();const num=(k:string)=>Number(f.get(k)||0);const base={id:value?.id??crypto.randomUUID(),activa:f.get('activa')==='on'};let result:Entity;if(entity==='categoria')result={...base,nombre:str('nombre'),tipo:str('tipo') as Categoria['tipo'],color,icono:str('icono'),presupuesto_mensual:num('presupuesto')};else if(entity==='deuda')result={...base,nombre:str('nombre'),acreedor:str('acreedor'),monto_inicial:num('monto'),tasa_interes_mensual:num('tasa'),fecha_inicio:str('fecha'),cuota_minima:num('cuota'),dia_pago:num('dia')};else result={...base,descripcion:str('descripcion'),monto:num('monto'),categoria:str('categoria'),tags:str('tags').toLowerCase().replaceAll('#',''),frecuencia:str('frecuencia') as Recurrente['frecuencia'],dia:num('dia'),proximo_pago:str('fecha'),metodo_pago:str('metodo') as Metodo};try{await saveEntity(entity,result);toast('Cambios guardados');onClose()}catch(err){setError(err instanceof Error?err.message:'No se pudo guardar')}finally{setBusy(false)}}return <Sheet title={`${value?'Editar':'Crear'} ${entity==='categoria'?'categoría':entity==='deuda'?'deuda':'pago recurrente'}`} onClose={onClose}><form className="form-stack entity-form" onSubmit={submit}>{entity==='categoria'?<><label>Nombre<input name="nombre" required maxLength={80} defaultValue={category?.nombre}/></label><label>Tipo<select name="tipo" defaultValue={category?.tipo??'gasto'}><option value="gasto">Gasto</option><option value="ingreso">Ingreso</option></select></label><label>Presupuesto mensual<input name="presupuesto" type="number" min="0" step="0.01" inputMode="decimal" defaultValue={category?.presupuesto_mensual??0}/></label><div className="form-two"><label>Color<input type="color" value={color} onChange={e=>setColor(e.target.value)}/></label><label>Icono<select name="icono" defaultValue={category?.icono??'Wallet'}>{Object.keys(categoryIcons).map(i=><option key={i}>{i}</option>)}</select></label></div></>:entity==='deuda'?<><label>Nombre de la deuda<input name="nombre" required maxLength={120} placeholder="Tarjeta de crédito" defaultValue={debt?.nombre}/></label><label>Acreedor<input name="acreedor" required defaultValue={debt?.acreedor} placeholder="Banco o persona"/></label><div className="form-two"><label>Saldo inicial<input name="monto" type="number" required min="0" step="0.01" inputMode="decimal" defaultValue={debt?.monto_inicial}/></label><label>Interés mensual (%)<input name="tasa" type="number" min="0" max="100" step="0.01" required inputMode="decimal" defaultValue={debt?.tasa_interes_mensual??0}/></label><label>Fecha inicial<input name="fecha" type="date" required defaultValue={debt?.fecha_inicio??todayISO()}/></label><label>Cuota mensual<input name="cuota" type="number" required min="0" step="0.01" inputMode="decimal" defaultValue={debt?.cuota_minima??0}/></label><label>Día de pago<input name="dia" type="number" required min="1" max="31" defaultValue={debt?.dia_pago??1}/></label></div><p className="footnote">Escribe 2 para una tasa del 2% mensual. Los intereses y la fecha de liberación son estimados.</p></>:<><label>Descripción<input name="descripcion" required placeholder="Internet de casa" defaultValue={recurring?.descripcion}/></label><div className="form-two"><label>Monto<input name="monto" type="number" min="0.01" step="0.01" required inputMode="decimal" defaultValue={recurring?.monto}/></label><label>Categoría<select name="categoria" defaultValue={recurring?.categoria??'Servicios'}>{data.categorias.filter(c=>c.tipo==='gasto'&&c.activa).map(c=><option key={c.id}>{c.nombre}</option>)}</select></label><label>Frecuencia<select name="frecuencia" defaultValue={recurring?.frecuencia??'mensual'}>{['semanal','quincenal','mensual','anual'].map(v=><option key={v}>{v}</option>)}</select></label><label>Día habitual<input name="dia" required type="number" min="1" max="31" defaultValue={recurring?.dia??Number(todayISO().slice(-2))}/></label><label>Próximo pago<input name="fecha" type="date" required defaultValue={recurring?.proximo_pago??todayISO()}/></label><label>Método<select name="metodo" defaultValue={recurring?.metodo_pago??'debito'}>{['debito','efectivo','credito','transferencia','otro'].map(v=><option key={v}>{v}</option>)}</select></label></div><label>Tags<input name="tags" placeholder="hogar, juntos" defaultValue={recurring?.tags}/></label><p className="footnote">“Registrar vencidos” creará los gastos fijos hasta hoy, sin duplicados. Al repetir una compra, el primer vencimiento será la siguiente fecha.</p></>}<label className="check-field"><input type="checkbox" name="activa" defaultChecked={value?.activa??true}/> {entity==='categoria'?'Categoría activa':entity==='deuda'?'Deuda activa':'Pago activo'}</label>{error&&<p className="error-message" role="alert">{error}</p>}<button className="button primary full" disabled={busy}>{busy?'Guardando…':'Guardar'}</button></form></Sheet>}
+import { useState, type FormEvent } from "react";
+import { useDrip } from "../context";
+import { todayISO } from "../lib/analytics";
+import { Sheet, categoryIcons } from "./ui";
+import type {
+  Categoria,
+  Deuda,
+  Entity,
+  EntityName,
+  Metodo,
+  Recurrente,
+} from "../types";
+export default function EntityEditor({
+  entity,
+  value,
+  onClose,
+}: {
+  entity: EntityName;
+  value?: Entity;
+  onClose: () => void;
+}) {
+  const { data, saveEntity, toast } = useDrip();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const category = value as Categoria | undefined;
+  const debt = value as Deuda | undefined;
+  const recurring = value as Recurrente | undefined;
+  const [color, setColor] = useState(category?.color ?? "#615BEA");
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const f = new FormData(e.currentTarget);
+    const str = (k: string) => String(f.get(k) ?? "").trim();
+    const num = (k: string) => Number(f.get(k) || 0);
+    const base = {
+      id: value?.id ?? crypto.randomUUID(),
+      activa: f.get("activa") === "on",
+    };
+    let result: Entity;
+    if (entity === "categoria")
+      result = {
+        ...base,
+        nombre: str("nombre"),
+        tipo: str("tipo") as Categoria["tipo"],
+        color,
+        icono: str("icono"),
+        presupuesto_mensual: num("presupuesto"),
+      };
+    else if (entity === "deuda")
+      result = {
+        ...base,
+        nombre: str("nombre"),
+        acreedor: str("acreedor"),
+        monto_inicial: num("monto"),
+        tasa_interes_mensual: num("tasa"),
+        fecha_inicio: str("fecha"),
+        cuota_minima: num("cuota"),
+        dia_pago: num("dia"),
+      };
+    else
+      result = {
+        ...base,
+        descripcion: str("descripcion"),
+        monto: num("monto"),
+        categoria: str("categoria"),
+        tags: str("tags").toLowerCase().replaceAll("#", ""),
+        frecuencia: str("frecuencia") as Recurrente["frecuencia"],
+        dia: num("dia"),
+        proximo_pago: str("fecha"),
+        metodo_pago: str("metodo") as Metodo,
+      };
+    try {
+      await saveEntity(entity, result);
+      toast("Cambios guardados");
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Sheet
+      title={`${value ? "Editar" : "Crear"} ${entity === "categoria" ? "categoría" : entity === "deuda" ? "deuda" : "pago recurrente"}`}
+      onClose={onClose}
+    >
+      <form className="form-stack entity-form" onSubmit={submit}>
+        {entity === "categoria" ? (
+          <>
+            <label>
+              Nombre
+              <input
+                name="nombre"
+                required
+                maxLength={80}
+                defaultValue={category?.nombre}
+              />
+            </label>
+            <label>
+              Tipo
+              <select name="tipo" defaultValue={category?.tipo ?? "gasto"}>
+                <option value="gasto">Gasto</option>
+                <option value="ingreso">Ingreso</option>
+              </select>
+            </label>
+            <label>
+              Presupuesto mensual
+              <input
+                name="presupuesto"
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                defaultValue={category?.presupuesto_mensual ?? 0}
+              />
+            </label>
+            <div className="form-two">
+              <label>
+                Color
+                <input
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                />
+              </label>
+              <label>
+                Icono
+                <select name="icono" defaultValue={category?.icono ?? "Wallet"}>
+                  {Object.keys(categoryIcons).map((i) => (
+                    <option key={i}>{i}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </>
+        ) : entity === "deuda" ? (
+          <>
+            <label>
+              Nombre de la deuda
+              <input
+                name="nombre"
+                required
+                maxLength={120}
+                placeholder="Tarjeta de crédito"
+                defaultValue={debt?.nombre}
+              />
+            </label>
+            <label>
+              Acreedor
+              <input
+                name="acreedor"
+                required
+                defaultValue={debt?.acreedor}
+                placeholder="Banco o persona"
+              />
+            </label>
+            <div className="form-two">
+              <label>
+                Saldo inicial
+                <input
+                  name="monto"
+                  type="number"
+                  required
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  defaultValue={debt?.monto_inicial}
+                />
+              </label>
+              <label>
+                Interés mensual (%)
+                <input
+                  name="tasa"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  required
+                  inputMode="decimal"
+                  defaultValue={debt?.tasa_interes_mensual ?? 0}
+                />
+              </label>
+              <label>
+                Fecha inicial
+                <input
+                  name="fecha"
+                  type="date"
+                  required
+                  defaultValue={debt?.fecha_inicio ?? todayISO()}
+                />
+              </label>
+              <label>
+                Cuota mensual
+                <input
+                  name="cuota"
+                  type="number"
+                  required
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  defaultValue={debt?.cuota_minima ?? 0}
+                />
+              </label>
+              <label>
+                Día de pago
+                <input
+                  name="dia"
+                  type="number"
+                  required
+                  min="1"
+                  max="31"
+                  defaultValue={debt?.dia_pago ?? 1}
+                />
+              </label>
+            </div>
+            <p className="footnote">
+              Escribe 2 para una tasa del 2% mensual. Los intereses y la fecha
+              de liberación son estimados.
+            </p>
+          </>
+        ) : (
+          <>
+            <label>
+              Descripción
+              <input
+                name="descripcion"
+                required
+                placeholder="Internet de casa"
+                defaultValue={recurring?.descripcion}
+              />
+            </label>
+            <div className="form-two">
+              <label>
+                Monto
+                <input
+                  name="monto"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  required
+                  inputMode="decimal"
+                  defaultValue={recurring?.monto}
+                />
+              </label>
+              <label>
+                Categoría
+                <select
+                  name="categoria"
+                  defaultValue={recurring?.categoria ?? "Servicios"}
+                >
+                  {data.categorias
+                    .filter((c) => c.tipo === "gasto" && (c.activa || c.nombre === recurring?.categoria))
+                    .map((c) => (
+                      <option key={c.id}>{c.nombre}</option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Frecuencia
+                <select
+                  name="frecuencia"
+                  defaultValue={recurring?.frecuencia ?? "mensual"}
+                >
+                  {["semanal", "quincenal", "mensual", "anual"].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Día habitual
+                <input
+                  name="dia"
+                  required
+                  type="number"
+                  min="1"
+                  max="31"
+                  defaultValue={recurring?.dia ?? Number(todayISO().slice(-2))}
+                />
+              </label>
+              <label>
+                Próximo pago
+                <input
+                  name="fecha"
+                  type="date"
+                  required
+                  defaultValue={recurring?.proximo_pago ?? todayISO()}
+                />
+              </label>
+              <label>
+                Método
+                <select
+                  name="metodo"
+                  defaultValue={recurring?.metodo_pago ?? "debito"}
+                >
+                  {[
+                    "debito",
+                    "efectivo",
+                    "credito",
+                    "transferencia",
+                    "otro",
+                  ].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label>
+              Tags
+              <input
+                name="tags"
+                placeholder="hogar, juntos"
+                defaultValue={recurring?.tags}
+              />
+            </label>
+            <p className="footnote">
+              “Registrar vencidos” creará los gastos fijos hasta hoy, sin
+              duplicados. Al repetir una compra, el primer vencimiento será la
+              siguiente fecha.
+            </p>
+          </>
+        )}
+        <label className="check-field">
+          <input
+            type="checkbox"
+            name="activa"
+            defaultChecked={value?.activa ?? true}
+          />{" "}
+          {entity === "categoria"
+            ? "Categoría activa"
+            : entity === "deuda"
+              ? "Deuda activa"
+              : "Pago activo"}
+        </label>
+        {error && (
+          <p className="error-message" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="button primary full" disabled={busy}>
+          {busy ? "Guardando…" : "Guardar"}
+        </button>
+      </form>
+    </Sheet>
+  );
+}

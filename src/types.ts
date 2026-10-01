@@ -4,8 +4,9 @@ export interface Registro {
   id: string; fecha: string; tipo: Tipo; subtipo: 'sueldo' | 'adicional' | 'variable' | 'fijo' | '';
   monto: number; categoria: string; tags: string; descripcion: string; metodo_pago: Metodo;
   necesidad: 'necesario' | 'innecesario' | ''; recurrente_id: string; deuda_id: string;
-  creado_en: string; actualizado_en: string; eliminado: boolean;
+  creado_en: string; actualizado_en: string; eliminado: boolean; usuario_id?: string;
 }
+export interface Usuario { id: string; nombre: string; correo: string }
 export interface Categoria { id: string; nombre: string; tipo: 'ingreso' | 'gasto'; color: string; icono: string; presupuesto_mensual: number; activa: boolean }
 export interface Deuda { id: string; nombre: string; acreedor: string; monto_inicial: number; tasa_interes_mensual: number; fecha_inicio: string; cuota_minima: number; dia_pago: number; activa: boolean }
 export interface Recurrente { id: string; descripcion: string; monto: number; categoria: string; tags: string; frecuencia: 'semanal' | 'quincenal' | 'mensual' | 'anual'; dia: number; proximo_pago: string; metodo_pago: Metodo; activa: boolean }

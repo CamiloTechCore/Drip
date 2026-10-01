@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createContext, runInContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataSet, Registro, Recurrente } from '../src/types';
@@ -11,6 +12,7 @@ class Sheet {
   maxRows = 1000;
   constructor(readonly locked: () => boolean) {}
   getLastRow() { return this.values.length; }
+  getLastColumn() { return (this.values[0] || []).length; }
   getMaxRows() { return this.maxRows; }
   setFrozenRows() { return this; }
   setColumnWidths() { return this; }
@@ -39,13 +41,16 @@ class Sheet {
 function harness() {
   let held = false;
   let acquired = 0;
+  let rangeValidations = 0;
   const sheets = new Map<string, Sheet>();
   const properties = new Map<string, string>();
   const token = 'test-placeholder-'.repeat(3);
-  const rule = { requireValueInList: () => rule, requireValueInRange: () => rule, setAllowInvalid: () => rule, requireCheckbox: () => rule, build: () => ({}) };
+  const rule = { requireValueInList: () => rule, requireValueInRange: () => { rangeValidations++; return rule; }, setAllowInvalid: () => rule, requireCheckbox: () => rule, build: () => ({}) };
   const source = readFileSync(new URL('../backend/Code.gs', import.meta.url), 'utf8')
-    .replace("'PEGA_AQUI_EL_ID_DE_TU_HOJA'", "'test-sheet-id'")
-    .replace("'CAMBIA_ESTE_TOKEN_LARGO'", JSON.stringify(token));
+    // Substitute declarations only in memory; configured user constants remain
+    // untouched on disk, and guards still exercise the production behavior.
+    .replace(/^const SPREADSHEET_ID = '[^']*';/m, "const SPREADSHEET_ID = 'test-sheet-id';")
+    .replace(/^const API_TOKEN = '[^']*';/m, `const API_TOKEN = ${JSON.stringify(token)};`);
   const output = (value: string) => ({ value, setMimeType() { return this; } });
   const context = createContext({
     Date, Math, JSON,
@@ -61,6 +66,10 @@ function harness() {
       formatDate: (date: Date, timezone: string, pattern: string) => pattern === 'yyyy-MM-dd'
         ? new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
         : date.toISOString(),
+      computeDigest: (_algorithm: unknown, value: string) => Array.from(createHash('sha256').update(value, 'utf8').digest()),
+      base64Encode: (bytes: number[]) => Buffer.from(bytes).toString('base64'),
+      DigestAlgorithm: { SHA_256: 'SHA_256' },
+      Charset: { UTF_8: 'UTF_8' },
     },
   });
   runInContext(source, context);
@@ -75,6 +84,7 @@ function harness() {
     health: () => JSON.parse((runInContext('doGet({})', context) as { value: string }).value) as Envelope,
     setup: () => runInContext('setup()', context),
     get lockCount() { return acquired; },
+    get categoryDropdownCount() { return rangeValidations; },
   };
 }
 
@@ -91,7 +101,7 @@ describe('single-file Apps Script API', () => {
 
   it('keeps health public and rejects bad tokens before opening or writing the sheet', () => {
     const api = harness();
-    expect(api.health()).toEqual({ ok: true, service: 'finanzas' });
+    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.02' });
     expect(api.post({ action: 'list' }, 'invalid').error).toBe('UNAUTHORIZED');
     expect(api.sheets.size).toBe(0);
     expect(api.lockCount).toBe(0);
@@ -100,13 +110,19 @@ describe('single-file Apps Script API', () => {
   it('creates exactly the specified sheets and preserves records on repeated setup', () => {
     const api = harness();
     api.setup();
-    expect([...api.sheets.keys()]).toEqual(['Registros', 'Categorias', 'Deudas', 'Recurrentes', 'Config']);
+    expect([...api.sheets.keys()]).toEqual(['Registros', 'Categorias', 'Deudas', 'Recurrentes', 'Config', 'Usuarios']);
     expect(api.post({ action: 'upsert', registro: expense() }).ok).toBe(true);
     api.setup();
     const listed = api.post<DataSet>({ action: 'list' });
     expect(listed.data.registros).toHaveLength(1);
     expect(listed.data.categorias).toHaveLength(15);
     expect(listed.data.config.moneda).toBe('COP');
+  });
+
+  it('installs category dropdowns on both record and recurring sheets during first-request setup', () => {
+    const api = harness();
+    expect(api.post({ action: 'list' }).ok).toBe(true);
+    expect(api.categoryDropdownCount).toBe(2);
   });
 
   it('handles retried UUIDs, last-write-wins, and incremental tombstones', () => {
@@ -234,5 +250,41 @@ describe('single-file Apps Script API', () => {
     expect(valid.data.excluir_fijos_de_racha).toBe(false);
     expect(valid.data.umbral_hormiga).toBe(12000);
     expect(valid.data.moneda).toBe('COP');
+  });
+
+  it('registers a user with a hashed password and rejects duplicate emails', () => {
+    const api = harness();
+    const created = api.post<{ id: string; nombre: string; correo: string }>({ action: 'register', nombre: 'Ana', correo: 'Ana@Example.com', password: 'Clave123!' });
+    expect(created.ok).toBe(true);
+    expect(created.data).toEqual({ id: created.data.id, nombre: 'Ana', correo: 'ana@example.com' });
+    const row = api.sheets.get('Usuarios')!.values[1];
+    expect(row[2]).toBe('ana@example.com');
+    expect(row[3]).not.toContain('Clave123!');
+    expect(api.post({ action: 'register', nombre: 'Otra', correo: 'ana@example.com', password: 'Clave123!' }).error).toBe('DUPLICATE_USER');
+  });
+
+  it('rejects registration passwords without the required strength', () => {
+    const api = harness();
+    expect(api.post({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'short1!' }).error).toBe('VALIDATION_ERROR');
+    expect(api.post({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'soloalfanumerico123' }).error).toBe('VALIDATION_ERROR');
+  });
+
+  it('logs in with correct credentials and rejects wrong passwords with a generic error', () => {
+    const api = harness();
+    api.post({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'Clave123!' });
+    const login = api.post<{ id: string; nombre: string; correo: string }>({ action: 'login', correo: 'ANA@example.com', password: 'Clave123!' });
+    expect(login.ok).toBe(true);
+    expect(login.data.correo).toBe('ana@example.com');
+    expect(api.post({ action: 'login', correo: 'ana@example.com', password: 'wrong-pass1!' }).error).toBe('UNAUTHORIZED');
+    expect(api.post({ action: 'login', correo: 'missing@example.com', password: 'Clave123!' }).error).toBe('UNAUTHORIZED');
+  });
+
+  it('tags new records with usuario_id and keeps it optional for older clients', () => {
+    const api = harness();
+    const user = api.post<{ id: string }>({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'Clave123!' }).data;
+    const owned = api.post<Registro>({ action: 'upsert', registro: expense({ usuario_id: user.id }) }).data;
+    expect(owned.usuario_id).toBe(user.id);
+    const legacy = api.post<Registro>({ action: 'upsert', registro: expense({ id: 'legacy-1' }) }).data;
+    expect(legacy.usuario_id).toBe('');
   });
 });

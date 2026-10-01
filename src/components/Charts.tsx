@@ -1,8 +1,270 @@
-import { Area, AreaChart, Bar, CartesianGrid, Cell, ComposedChart, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { useReducedMotion } from 'framer-motion';
-import { money } from '../lib/format';
-const colors=['#615BEA','#37B89A','#F4B85F','#83A0EB','#E48DA5','#8A73A8','#72BAC5'];
-export function CashChart({data,currency,compact=false}:{data:{label:string;income:number;expenses:number;savings?:number}[];currency:string;compact?:boolean}){const reduce=useReducedMotion();return <div role="img" aria-label={`Ingresos y gastos: ${data.map(d=>`${d.label}: ingresos ${d.income}, gastos ${d.expenses}`).join('; ')}`} className="chart" style={{height:compact?165:230}}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data} margin={{top:12,right:4,left:-24,bottom:0}}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#ECEEF3"/><XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#717586'}} tickMargin={12}/><YAxis axisLine={false} tickLine={false} tick={{fontSize:10,fill:'#717586'}} tickFormatter={v=>Math.abs(v)>=1000000?`${v/1000000}m`:Math.abs(v)>=1000?`${v/1000}k`:v}/><Tooltip formatter={(v:number)=>money(v,currency)} contentStyle={{borderRadius:14,border:0,boxShadow:'0 4px 30px #20233612'}}/><Bar name="Ingresos" dataKey="income" fill="#BFC0F7" radius={[5,5,0,0]} maxBarSize={16} isAnimationActive={!reduce}/><Bar name="Gastos" dataKey="expenses" fill="#615BEA" radius={[5,5,0,0]} maxBarSize={16} isAnimationActive={!reduce}/>{!compact&&<Line name="Ahorro neto" dataKey="savings" stroke="#138465" strokeWidth={2} dot={false} isAnimationActive={!reduce}/>}</ComposedChart></ResponsiveContainer></div>}
-export function DonutChart({data,currency,onSelect}:{data:{name:string;total:number}[];currency:string;onSelect:(name:string)=>void}){const reduce=useReducedMotion();return <><div role="img" aria-label={`Gastos por categoría: ${data.map(d=>`${d.name}: ${d.total}`).join('; ')}`} className="chart" style={{height:200}}><ResponsiveContainer><PieChart><Pie data={data} dataKey="total" nameKey="name" innerRadius={62} outerRadius={87} paddingAngle={3} stroke="none" isAnimationActive={!reduce} onClick={(entry:{name:string})=>onSelect(entry.name)}>{data.map((d,i)=><Cell key={d.name} fill={colors[i%colors.length]}/>)}</Pie><Tooltip formatter={(v:number)=>money(v,currency)}/></PieChart></ResponsiveContainer></div><div className="chart-category-list">{data.map((d,i)=><button key={d.name} onClick={()=>onSelect(d.name)}><span><i style={{background:colors[i%colors.length]}}/>{d.name}</span><strong>{money(d.total,currency)}</strong></button>)}</div></>}
-export function SalaryChart({data,currency}:{data:{label:string;salary:number;additional:number}[];currency:string}){const reduce=useReducedMotion();return <div className="chart" role="img" aria-label="Evolución de ingresos por sueldo e ingresos adicionales" style={{height:190}}><ResponsiveContainer><AreaChart data={data} margin={{left:-24,right:8,top:10}}><CartesianGrid vertical={false} strokeDasharray="3 5"/><XAxis dataKey="label" tick={{fontSize:11}} axisLine={false} tickLine={false}/><YAxis tickFormatter={v=>`${v/1000000}m`} tick={{fontSize:10}} axisLine={false} tickLine={false}/><Tooltip formatter={(v:number)=>money(v,currency)}/><Area type="monotone" name="Sueldo" dataKey="salary" stackId="1" stroke="#615BEA" fill="#C5C3F7" isAnimationActive={!reduce}/><Area type="monotone" name="Adicionales" dataKey="additional" stackId="1" stroke="#138465" fill="#C6EDE1" isAnimationActive={!reduce}/></AreaChart></ResponsiveContainer></div>}
-export function TrendChart({data,dataKey,label,currency}:{data:Record<string,string|number>[];dataKey:string;label:string;currency:string}){const reduce=useReducedMotion();return <div className="chart" role="img" aria-label={label} style={{height:170}}><ResponsiveContainer><LineChart data={data} margin={{left:-24,right:8,top:10}}><CartesianGrid vertical={false} strokeDasharray="3 5"/><XAxis dataKey="label" tick={{fontSize:10}} axisLine={false} tickLine={false}/><YAxis tickFormatter={v=>Math.abs(v)>=1000000?`${v/1000000}m`:`${v/1000}k`} tick={{fontSize:10}} axisLine={false} tickLine={false}/><Tooltip formatter={(v:number)=>money(v,currency)}/><Line type="monotone" name={label} dataKey={dataKey} stroke="#615BEA" strokeWidth={3} dot={{r:3}} isAnimationActive={!reduce}/></LineChart></ResponsiveContainer></div>}
+import {
+  Area,
+  AreaChart,
+  Bar,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { useReducedMotion } from "framer-motion";
+import { money } from "../lib/format";
+const colors = [
+  "#615BEA",
+  "#37B89A",
+  "#F4B85F",
+  "#83A0EB",
+  "#E48DA5",
+  "#8A73A8",
+  "#72BAC5",
+];
+export function CashChart({
+  data,
+  currency,
+  compact = false,
+}: {
+  data: { label: string; income: number; expenses: number; savings?: number }[];
+  currency: string;
+  compact?: boolean;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <div
+      role="img"
+      aria-label={`Ingresos y gastos: ${data.map((d) => `${d.label}: ingresos ${d.income}, gastos ${d.expenses}`).join("; ")}`}
+      className="chart"
+      style={{ height: compact ? 165 : 230 }}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart
+          data={data}
+          margin={{ top: 12, right: 4, left: -24, bottom: 0 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 5"
+            vertical={false}
+            stroke="#ECEEF3"
+          />
+          <XAxis
+            dataKey="label"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 11, fill: "#717586" }}
+            tickMargin={12}
+          />
+          <YAxis
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 10, fill: "#717586" }}
+            tickFormatter={(v) =>
+              Math.abs(v) >= 1000000
+                ? `${v / 1000000}m`
+                : Math.abs(v) >= 1000
+                  ? `${v / 1000}k`
+                  : v
+            }
+          />
+          <Tooltip
+            formatter={(v: number) => money(v, currency)}
+            contentStyle={{
+              borderRadius: 14,
+              border: 0,
+              boxShadow: "0 4px 30px #20233612",
+            }}
+          />
+          <Bar
+            name="Ingresos"
+            dataKey="income"
+            fill="#BFC0F7"
+            radius={[5, 5, 0, 0]}
+            maxBarSize={16}
+            isAnimationActive={!reduce}
+          />
+          <Bar
+            name="Gastos"
+            dataKey="expenses"
+            fill="#615BEA"
+            radius={[5, 5, 0, 0]}
+            maxBarSize={16}
+            isAnimationActive={!reduce}
+          />
+          {!compact && (
+            <Line
+              name="Ahorro neto"
+              dataKey="savings"
+              stroke="#138465"
+              strokeWidth={2}
+              dot={false}
+              isAnimationActive={!reduce}
+            />
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+export function DonutChart({
+  data,
+  currency,
+  onSelect,
+}: {
+  data: { name: string; total: number }[];
+  currency: string;
+  onSelect: (name: string) => void;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <>
+      <div
+        role="img"
+        aria-label={`Gastos por categoría: ${data.map((d) => `${d.name}: ${d.total}`).join("; ")}`}
+        className="chart"
+        style={{ height: 200 }}
+      >
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="total"
+              nameKey="name"
+              innerRadius={62}
+              outerRadius={87}
+              paddingAngle={3}
+              stroke="none"
+              isAnimationActive={!reduce}
+              onClick={(entry: { name: string }) => onSelect(entry.name)}
+            >
+              {data.map((d, i) => (
+                <Cell key={d.name} fill={colors[i % colors.length]} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(v: number) => money(v, currency)} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="chart-category-list">
+        {data.map((d, i) => (
+          <button key={d.name} onClick={() => onSelect(d.name)}>
+            <span>
+              <i style={{ background: colors[i % colors.length] }} />
+              {d.name}
+            </span>
+            <strong>{money(d.total, currency)}</strong>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+export function SalaryChart({
+  data,
+  currency,
+}: {
+  data: { label: string; salary: number; additional: number }[];
+  currency: string;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <div
+      className="chart"
+      role="img"
+      aria-label="Evolución de ingresos por sueldo e ingresos adicionales"
+      style={{ height: 190 }}
+    >
+      <ResponsiveContainer>
+        <AreaChart data={data} margin={{ left: -24, right: 8, top: 10 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 5" />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            tickFormatter={(v) => `${v / 1000000}m`}
+            tick={{ fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip formatter={(v: number) => money(v, currency)} />
+          <Area
+            type="monotone"
+            name="Sueldo"
+            dataKey="salary"
+            stackId="1"
+            stroke="#615BEA"
+            fill="#C5C3F7"
+            isAnimationActive={!reduce}
+          />
+          <Area
+            type="monotone"
+            name="Adicionales"
+            dataKey="additional"
+            stackId="1"
+            stroke="#138465"
+            fill="#C6EDE1"
+            isAnimationActive={!reduce}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+export function TrendChart({
+  data,
+  dataKey,
+  label,
+  currency,
+}: {
+  data: object[];
+  dataKey: string;
+  label: string;
+  currency: string;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <div
+      className="chart"
+      role="img"
+      aria-label={label}
+      style={{ height: 170 }}
+    >
+      <ResponsiveContainer>
+        <LineChart data={data} margin={{ left: -24, right: 8, top: 10 }}>
+          <CartesianGrid vertical={false} strokeDasharray="3 5" />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            tickFormatter={(v) =>
+              Math.abs(v) >= 1000000 ? `${v / 1000000}m` : `${v / 1000}k`
+            }
+            tick={{ fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip formatter={(v: number) => money(v, currency)} />
+          <Line
+            type="monotone"
+            name={label}
+            dataKey={dataKey}
+            stroke="#615BEA"
+            strokeWidth={3}
+            dot={{ r: 3 }}
+            isAnimationActive={!reduce}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

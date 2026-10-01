@@ -1,7 +1,9 @@
 import { get, update } from 'idb-keyval';
 import { EMPTY_DATA } from '../lib/defaults';
 import { createDemoData } from '../lib/demo';
-import type { Config, DataSet, Entity, EntityName, Registro } from '../types';
+import { today } from '../lib/format';
+import { validateConfig, validateEntity, validateRegistro } from './validation';
+import type { Categoria, Config, DataSet, Entity, EntityName, Recurrente, Registro, Usuario } from '../types';
 import type { Settings } from '../store/settings';
 
 export type Operation = { action: 'upsert'; registro: Registro } | { action: 'delete'; id: string; actualizado_en: string };
@@ -91,9 +93,10 @@ function nextTimestamp(existing?: string): string {
 }
 export async function saveRegistro(account: Account, registro: Registro): Promise<void> {
   await changeCache(account, state => {
-    const existing = state.data.registros.find(row => row.id === registro.id);
+    const valid = validateRegistro(registro, state.data);
+    const existing = state.data.registros.find(row => row.id === valid.id);
     const stamp = nextTimestamp(existing?.actualizado_en);
-    const row = { ...registro, creado_en: existing?.creado_en || registro.creado_en || stamp, actualizado_en: stamp, eliminado: false };
+    const row = { ...valid, creado_en: existing?.creado_en || valid.creado_en || stamp, actualizado_en: stamp, eliminado: false };
     const operation: Operation = { action: 'upsert', registro: row };
     const queue = account.settings.isDemo ? [] : [...state.queue, { queueId: crypto.randomUUID(), operation }];
     return { ...state, queue, data: { ...state.data, registros: mergeRegistros(state.data.registros, [row], []) } };
@@ -133,7 +136,9 @@ export async function request<T>(account: Account, payload: Record<string, unkno
       const result: ApiResponse<T> = await response.json() as ApiResponse<T>;
       if (!result || typeof result.ok !== 'boolean') throw new Error('La implementación no devolvió JSON válido. Revisa el acceso para cualquier usuario.');
       if (!result.ok) {
-        const message = result.error === 'UNAUTHORIZED' ? 'El token de acceso es incorrecto. Revísalo en Ajustes.' : result.message || `El servidor rechazó la operación (${result.error}).`;
+        const message = result.error === 'UNAUTHORIZED' && payload.action !== 'login'
+          ? 'El token de acceso es incorrecto. Revísalo en Ajustes.'
+          : result.message || `El servidor rechazó la operación (${result.error}).`;
         // Validation and authorization failures are not transient.
         const error = new Error(message); error.name = 'ApiError'; throw error;
       }
@@ -147,18 +152,31 @@ export async function request<T>(account: Account, payload: Record<string, unkno
   throw new Error(lastError.name === 'AbortError' ? 'Google Sheets tardó demasiado. Tus cambios siguen guardados; vuelve a sincronizar.' : lastError.message);
 }
 
+export async function registerUser(account: Account, input: { nombre: string; correo: string; password: string }): Promise<Usuario> {
+  return request<Usuario>(account, { action: 'register', ...input });
+}
+export async function loginUser(account: Account, input: { correo: string; password: string }): Promise<Usuario> {
+  return request<Usuario>(account, { action: 'login', ...input });
+}
+
 export async function syncAccount(account: Account): Promise<void> {
   if (account.settings.isDemo) return;
   assertConnection(account);
-  return locked(`drip:sync:${account.namespace}`, async () => {
+  return locked(`drip:sync:${account.namespace}`, () => syncUnlocked(account));
+}
+async function syncUnlocked(account: Account): Promise<void> {
     // Bound this pass; edits created while the request is in flight stay queued for the next pass.
     const snapshotIds = new Set((await readCache(account)).queue.map(item => item.queueId));
     while (true) {
-      const sent = (await readCache(account)).queue.filter(item => snapshotIds.has(item.queueId)).slice(0, 50);
-      if (!sent.length) break;
+      const eligible = (await readCache(account)).queue.filter(item => snapshotIds.has(item.queueId));
+      if (!eligible.length) break;
       const latest = new Map<string, Operation>();
-      sent.forEach(item => latest.set(opId(item.operation), item.operation));
-      const result = await request<{ registros: Registro[]; serverTime: string }>(account, { action: 'batch', operations: [...latest.values()] });
+      eligible.forEach(item => latest.set(opId(item.operation), item.operation));
+      const operations = [...latest.values()].slice(0, 50);
+      const recordIds = new Set(operations.map(opId));
+      // Compact the entire snapshot before chunking, then acknowledge every older edit of those IDs.
+      const sent = eligible.filter(item => recordIds.has(opId(item.operation)));
+      const result = await request<{ registros: Registro[]; serverTime: string }>(account, { action: 'batch', operations });
       const sentIds = new Set(sent.map(item => item.queueId));
       await changeCache(account, current => {
         const stamps = new Map(result.registros.map(row => [row.id, row.actualizado_en]));
@@ -174,7 +192,8 @@ export async function syncAccount(account: Account): Promise<void> {
             : { ...item.operation, actualizado_en: stamp };
           return { ...item, operation };
         });
-        const canonicalIds = new Set(result.registros.map(row => row.id));
+        const acknowledged = new Set(current.queue.filter(item => sentIds.has(item.queueId)).map(item => opId(item.operation)));
+        const canonicalIds = new Set(result.registros.filter(row => acknowledged.has(row.id)).map(row => row.id));
         // Canonical acknowledgements replace optimistic timestamps, including clock skew.
         return { ...current, queue, data: { ...current.data, registros: mergeRegistros(current.data.registros.filter(row => !canonicalIds.has(row.id)), result.registros, queue) } };
       });
@@ -185,32 +204,93 @@ export async function syncAccount(account: Account): Promise<void> {
       ...current, cursor: result.serverTime,
       data: { categorias: result.categorias, deudas: result.deudas, recurrentes: result.recurrentes, config: result.config, registros: mergeRegistros(current.data.registros, result.registros, current.queue) },
     }));
+}
+
+function applyEntity(state: CacheState, entity: EntityName, data: Entity): CacheState {
+  const field = ({ categoria: 'categorias', deuda: 'deudas', recurrente: 'recurrentes' } as const)[entity];
+  const rows: Entity[] = state.data[field];
+  const next = { ...state, data: { ...state.data, [field]: [...rows.filter(row => row.id !== data.id), data] } };
+  if (entity !== 'categoria') return next;
+  const previous = state.data.categorias.find(category => category.id === data.id);
+  const category = data as Categoria;
+  if (!previous || previous.nombre === category.nombre) return next;
+  const rename = (row: Registro): Registro => row.categoria === previous.nombre ? { ...row, categoria: category.nombre } : row;
+  next.data.registros = next.data.registros.map(rename);
+  next.data.recurrentes = next.data.recurrentes.map(template => template.categoria === previous.nombre ? { ...template, categoria: category.nombre } : template);
+  next.queue = state.queue.map(item => {
+    if (item.operation.action !== 'upsert' || item.operation.registro.categoria !== previous.nombre) return item;
+    const renamed = { ...rename(item.operation.registro), actualizado_en: nextTimestamp(item.operation.registro.actualizado_en) };
+    return { ...item, operation: { action: 'upsert', registro: renamed } };
   });
+  next.data.registros = mergeRegistros(next.data.registros, [], next.queue);
+  return next;
 }
 
 export async function saveEntity(account: Account, entity: EntityName, data: Entity): Promise<void> {
   if (account.settings.isDemo) {
-    await changeCache(account, state => {
-      const field = ({ categoria: 'categorias', deuda: 'deudas', recurrente: 'recurrentes' } as const)[entity];
-      const rows: Entity[] = state.data[field];
-      return { ...state, data: { ...state.data, [field]: [...rows.filter(row => row.id !== data.id), data] } };
-    }); return;
+    await changeCache(account, state => applyEntity(state, entity, validateEntity(entity, data, state.data))); return;
   }
-  await request(account, { action: 'saveEntity', entity, data }); await syncAccount(account);
+  await locked(`drip:sync:${account.namespace}`, async () => {
+    const current = await readCache(account);
+    const valid = validateEntity(entity, data, current.data);
+    const canonical = await request<Entity>(account, { action: 'saveEntity', entity, data: valid });
+    await changeCache(account, state => applyEntity(state, entity, canonical));
+    await syncUnlocked(account);
+  });
 }
 export async function saveConfig(account: Account, config: Config): Promise<void> {
-  if (account.settings.isDemo) { await changeCache(account, state => ({ ...state, data: { ...state.data, config } })); return; }
-  await request(account, { action: 'saveConfig', config }); await syncAccount(account);
+  const valid = validateConfig(config);
+  if (account.settings.isDemo) { await changeCache(account, state => ({ ...state, data: { ...state.data, config: valid } })); return; }
+  await locked(`drip:sync:${account.namespace}`, async () => {
+    const canonical = await request<Config>(account, { action: 'saveConfig', config: valid });
+    await changeCache(account, state => ({ ...state, data: { ...state.data, config: canonical } }));
+    await syncUnlocked(account);
+  });
 }
-export async function materialize(account: Account): Promise<void> {
-  if (account.settings.isDemo) return;
-  // A backend pass is capped to keep Apps Script within its execution limits.
-  for (let pass = 0; pass < 12; pass++) {
-    const result = await request<{ pending: boolean }>(account, { action: 'materializeRecurrentes' });
-    if (!result.pending) { await syncAccount(account); return; }
+function nextRecurringDate(date: string, template: Recurrente): string {
+  const [year, month, day] = date.split('-').map(Number);
+  if (template.frecuencia === 'semanal' || template.frecuencia === 'quincenal') return new Date(Date.UTC(year, month - 1, day + (template.frecuencia === 'semanal' ? 7 : 15))).toISOString().slice(0, 10);
+  const nextYear = year + (template.frecuencia === 'anual' ? 1 : 0);
+  const nextMonth = month - 1 + (template.frecuencia === 'mensual' ? 1 : 0);
+  const last = new Date(Date.UTC(nextYear, nextMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(nextYear, nextMonth, Math.min(template.dia, last))).toISOString().slice(0, 10);
+}
+export async function materialize(account: Account, through = today()): Promise<void> {
+  if (account.settings.isDemo) {
+    let remaining = false;
+    await changeCache(account, state => {
+      const records = [...state.data.registros];
+      const existing = new Set(records.filter(row => row.recurrente_id).map(row => `${row.recurrente_id}|${row.fecha}`));
+      let processed = 0;
+      const recurrentes = state.data.recurrentes.map(template => {
+        if (!template.activa) return template;
+        let cursor = template.proximo_pago;
+        while (cursor <= through && processed < 6000) {
+          const occurrence = `${template.id}|${cursor}`;
+          if (!existing.has(occurrence)) {
+            const stamp = new Date().toISOString();
+            records.push(validateRegistro({ id: `rec:${template.id}:${cursor}`, fecha: cursor, tipo: 'gasto', subtipo: 'fijo', monto: template.monto, categoria: template.categoria, tags: template.tags, descripcion: template.descripcion, metodo_pago: template.metodo_pago, necesidad: 'necesario', recurrente_id: template.id, deuda_id: '', eliminado: false, creado_en: stamp, actualizado_en: stamp }, state.data));
+            existing.add(occurrence);
+          }
+          processed++; cursor = nextRecurringDate(cursor, template);
+        }
+        if (cursor <= through) remaining = true;
+        return { ...template, proximo_pago: cursor };
+      });
+      return { ...state, data: { ...state.data, registros: records, recurrentes } };
+    });
+    if (remaining) throw new Error('Se generó una parte de los pagos pendientes. Vuelve a generar para continuar.');
+    return;
   }
-  await syncAccount(account);
-  throw new Error('Se generó una parte de los pagos pendientes. Vuelve a generar para continuar.');
+  await locked(`drip:sync:${account.namespace}`, async () => {
+    // A backend pass is capped to keep Apps Script within its execution limits.
+    for (let pass = 0; pass < 12; pass++) {
+      const result = await request<{ pending: boolean }>(account, { action: 'materializeRecurrentes' });
+      if (!result.pending) { await syncUnlocked(account); return; }
+    }
+    await syncUnlocked(account);
+    throw new Error('Se generó una parte de los pagos pendientes. Vuelve a generar para continuar.');
+  });
 }
 
 /** Explicit, repeat-safe transfer from never-connected local stores; existing target IDs win. */
@@ -229,7 +309,7 @@ export async function importLocalRecords(account: Account): Promise<number> {
     const imported: Registro[] = [];
     for (const source of sources) {
       if (ids.has(source.id)) continue;
-      ids.add(source.id); imported.push({ ...source, actualizado_en: nextTimestamp(source.actualizado_en) });
+      ids.add(source.id); imported.push({ ...validateRegistro(source, state.data), actualizado_en: nextTimestamp(source.actualizado_en) });
     }
     count = imported.length;
     const queue = [...state.queue, ...imported.map(registro => ({ queueId: crypto.randomUUID(), operation: { action: 'upsert', registro } as Operation }))];

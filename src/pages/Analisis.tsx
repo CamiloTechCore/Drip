@@ -1,28 +1,626 @@
-import { useState } from 'react';
-import { Link,useNavigate } from 'react-router-dom';
-import { ChevronLeft,ChevronRight,Flame,Leaf,Share2,Award,TrendingDown } from 'lucide-react';
-import { format,parseISO } from 'date-fns';
-import { es } from 'date-fns/locale';
-import { useDrip } from '../context';
-import { addDays,addMonths,filterRecords,getAntExpenses,getCategoryTotals,getCycles,getDebtSummary,getHeatmap,getMonthlySummary,getRepeatedExpenses,getSpendingPatterns,getStreaks,getTagTotals,getTotals,getUnnecessaryGrowth,todayISO } from '../lib/analytics';
-import { money } from '../lib/format';
-import { Card,Empty,SectionTitle } from '../components/ui';
-import { CashChart,DonutChart,SalaryChart,TrendChart } from '../components/Charts';
-export default function Analisis(){const {data,share}=useDrip();const navigate=useNavigate();const {registros,config}=data;const today=todayISO();const [period,setPeriod]=useState('cycle');const [month,setMonth]=useState(`${today.slice(0,7)}-01`);const cycles=getCycles(registros,config,today);const current=cycles.at(-1);const start=period==='30'?addDays(today,-29):period==='3'?addMonths(today,-3):period==='year'?`${today.slice(0,4)}-01-01`:current?.start??`${today.slice(0,7)}-01`;const rows=filterRecords(registros,start,today);const totals=getTotals(rows);const monthly=getMonthlySummary(rows);const categoryTotals=getCategoryTotals(rows);const tagTotals=getTagTotals(rows);const ants=getAntExpenses(registros,config,today);const repeated=getRepeatedExpenses(rows);const growth=getUnnecessaryGrowth(registros,start,today);const debt=getDebtSummary(data.deudas,registros,today);const streak=getStreaks(registros,config,today);const heatmap=getHeatmap(registros,config,month,today);const patterns=getSpendingPatterns(rows);const c=config.moneda;const budgetTotals=getCategoryTotals(filterRecords(registros,`${today.slice(0,7)}-01`,today));const upcoming=data.recurrentes.filter(r=>r.activa).sort((a,b)=>a.proximo_pago.localeCompare(b.proximo_pago));const maxWeek=Math.max(1,...patterns.weekdays.map(d=>d.total));const maxDay=Math.max(1,...patterns.monthDays.map(d=>d.total));const firstWeekday=(parseISO(month).getDay()+6)%7;
- return <div className="page analysis-page"><div className="page-intro"><span className="eyebrow">MENOS DUDAS. MÁS CLARIDAD.</span><div className="title-row"><h1>Tu panorama<span className="title-dot">.</span></h1><button className="icon-button bordered" onClick={share} aria-label="Compartir análisis"><Share2 size={19}/></button></div><p>Conoce tus hábitos. Haz espacio para tus metas.</p></div><div className="period-select" role="group" aria-label="Periodo de análisis">{[['cycle','Este ciclo'],['30','30 días'],['3','3 meses'],['year','Este año']].map(([v,l])=><button className={period===v?'active':''} key={v} onClick={()=>setPeriod(v)}>{l}</button>)}</div><p className="period-label">{format(parseISO(start),'d MMM',{locale:es})} — {format(parseISO(today),'d MMM yyyy',{locale:es})}</p>
- {rows.length===0&&<Card><Empty title="Tu panorama necesita algunas gotas" text="Agrega movimientos o activa la demo en Más para explorar cada gráfico."/></Card>}
- <div className="summary-grid"><Card><span className="eyebrow">INGRESOS</span><strong>{money(totals.income,c)}</strong><span className="positive">Todo lo que llega</span></Card><Card><span className="eyebrow">GASTOS</span><strong>{money(totals.expenses,c)}</strong><span>Todo lo que sale</span></Card></div>
- <Card><SectionTitle title="Entradas, salidas y planes"/><div className="legend"><span><i className="lavender"/>Ingresos</span><span><i/>Gastos</span><span><i className="green"/>Ahorro</span></div>{monthly.length?<CashChart data={monthly} currency={c}/>:<p className="empty-inline">El primer registro dibuja el primer punto.</p>}<div className="soft-metric"><Leaf size={20}/><span>Ahorro neto<strong>{money(totals.savings,c)}</strong></span></div></Card>
- <Card><SectionTitle title="De dónde viene tu dinero"/><div className="legend"><span><i/>Sueldo</span><span><i className="green"/>Adicionales</span></div><SalaryChart data={monthly} currency={c}/><div className="two-stats"><span>Sueldo<strong>{money(monthly.reduce((s,m)=>s+m.salary,0),c)}</strong></span><span>Adicionales<strong>{money(monthly.reduce((s,m)=>s+m.additional,0),c)}</strong></span></div></Card>
- <Card><SectionTitle title="En qué se va" eyebrow="GASTOS POR CATEGORÍA"/>{categoryTotals.length?<DonutChart data={categoryTotals} currency={c} onSelect={name=>navigate(`/movimientos?categoria=${encodeURIComponent(name)}`)}/>:<p className="empty-inline">Tus categorías aparecerán aquí al registrar gastos.</p>}</Card>
- <Card><SectionTitle title="Un límite que te cuida" eyebrow="PRESUPUESTOS · ESTE MES"/>{data.categorias.filter(cat=>cat.activa&&cat.presupuesto_mensual>0).map(cat=>{const spent=budgetTotals.find(t=>t.name===cat.nombre)?.total??0;return <div className="budget" key={cat.id}><div><span>{cat.nombre}</span><strong>{Math.round(spent/cat.presupuesto_mensual*100)}%</strong></div><div className={`progress ${spent>cat.presupuesto_mensual?'over':''}`}><span style={{width:`${Math.min(100,spent/cat.presupuesto_mensual*100)}%`,background:spent>cat.presupuesto_mensual?'#CC5454':cat.color}}/></div><small>{money(spent,c)} de {money(cat.presupuesto_mensual,c)}</small></div>})}{!data.categorias.some(cat=>cat.presupuesto_mensual>0)&&<p className="empty-inline">Define un presupuesto en <Link to="/mas?section=categorias">Más → Categorías</Link> y sigue tu progreso.</p>}</Card>
- <Card><SectionTitle title="Tus gastos, en palabras" eyebrow="TAGS"/><div className="tag-ranking">{tagTotals.map(t=><Link to={`/movimientos?tag=${encodeURIComponent(t.name)}`} key={t.name}><span>#{t.name}</span><strong>{money(t.total,c)}</strong></Link>)}</div>{!tagTotals.length&&<p className="empty-inline">Añade tags como “juntos” o “antojo” a tus movimientos.</p>}<p className="footnote">Un movimiento puede tener varios tags; sus totales no se suman entre sí.</p></Card>
- <Card className="ant-card"><SectionTitle title="Pequeños gastos, gran efecto" eyebrow="GASTOS HORMIGA · ÚLTIMOS 30 DÍAS"/><div className="large-metric">{money(ants.total,c)}</div><p>Al mismo ritmo serían <strong>{money(ants.annualProjection,c)}</strong> en un año.</p>{ants.items.map(item=><div className="rank-row" key={item.key}><div><strong>{item.label}</strong><span>{item.count} veces · {money(item.average,c)} en promedio</span></div><strong>{money(item.total,c)}</strong></div>)}{!ants.items.length&&<p className="empty-inline">No detectamos pequeños gastos repetidos en los últimos 30 días.</p>}</Card>
- <Card><SectionTitle title="Los que siempre vuelven" eyebrow="MÁS REPETIDOS"/>{repeated.slice(0,8).map((r,i)=><div className="rank-row" key={r.key}><span className="rank-number">{String(i+1).padStart(2,'0')}</span><div><strong>{r.label}</strong><span>{r.count} veces · prom. {money(r.average,c)}</span><span>Último: {format(parseISO(r.lastDate),'d MMM',{locale:es})}</span></div><strong>{money(r.total,c)}</strong></div>)}{!repeated.length&&<p className="empty-inline">Aún no hay gastos repetidos en este periodo.</p>}</Card>
- <Card><SectionTitle title="¿Gustos o costumbres?" eyebrow="GASTOS INNECESARIOS"/><div className="metric-row"><strong className="large-metric">{money(growth.current,c)}</strong><span className={`growth-badge ${(growth.percent??0)<=0?'positive':'danger-text'}`}>{growth.percent===null?'Sin base previa':`${growth.percent>0?'+':''}${growth.percent.toFixed(1)}%`}</span></div><p className="footnote">Comparado con el periodo anterior de la misma duración.</p><TrendChart data={monthly} dataKey="unnecessary" label="Gastos innecesarios" currency={c}/></Card>
- <Card><SectionTitle title="Más cerca de estar libre" eyebrow="TUS DEUDAS"/><div className="large-metric">{money(debt.balance,c)}</div><p className="footnote">Saldo estimado al {format(parseISO(today),'d MMM',{locale:es})} · {debt.growthPercent===null?'sin base anterior':`${debt.growthPercent>0?'+':''}${debt.growthPercent.toFixed(1)}% frente al cierre anterior`}</p>{debt.history.length>0&&<TrendChart data={debt.history.filter(d=>d.date>=start).map(d=>({...d,label:format(parseISO(d.date),'MMM',{locale:es})}))} dataKey="balance" label="Saldo de deuda" currency={c}/>}<div className="two-stats"><span>Abonos acumulados<strong>{money(debt.payments,c)}</strong></span><span>Interés estimado<strong>{money(debt.interest,c)}</strong></span></div><div className="note">{debt.balance===0?'Un saldo en cero. Un poco más de tranquilidad.':debt.payoffDate?`Con las cuotas actuales, podrías terminar en ${format(parseISO(debt.payoffDate),'MMMM yyyy',{locale:es})}.`:'La cuota actual no permite estimar una fecha de liberación. Revisa tus deudas.'}</div><p className="footnote">Estimación mensual, sin comisiones ni movimientos futuros. El estado de tu acreedor es la referencia.</p><Link className="text-link" to="/mas?section=deudas">Administrar deudas <ChevronRight size={14}/></Link></Card>
- <Card><SectionTitle title="Cada ciclo, una oportunidad"/>{cycles.filter(cycle=>cycle.end>=start).slice(-12).map(cycle=><div className="cycle-row" key={cycle.id}><strong>{cycle.label}</strong><div><span>Gastado {money(cycle.expenses,c)}</span><span>Ahorro {money(cycle.savings,c)}</span></div><span>{cycle.spentPercent.toFixed(0)}%</span></div>)}<p className="footnote">El porcentaje compara los gastos con todos los ingresos de cada ciclo.</p></Card>
- <Card><SectionTitle title="Los días de más movimiento"/><div className="weekday-chart">{patterns.weekdays.map(d=><div key={d.day}><strong>{money(d.total,c)}</strong><span style={{height:Math.max(3,d.total/maxWeek*80)}}/><small>{d.label.slice(0,3)}</small></div>)}</div><p className="field-heading">Día del mes</p><div className="month-spending">{patterns.monthDays.map(d=><span key={d.day} title={`Día ${d.day}: ${money(d.total,c)}`} aria-label={`Día ${d.day}: ${money(d.total,c)}`} style={{background:`rgba(97,91,234,${.05+d.total/maxDay*.8})`,color:d.total/maxDay>.6?'white':'#494865'}}>{d.day}</span>)}</div></Card>
- <Card id-ignored="racha"><div id="racha"/><SectionTitle title="Tu constancia merece celebrarse" eyebrow="DÍAS SIN GASTAR"/><div className="streak-summary"><Flame size={38}/><strong>{streak.current}</strong><span>días<br/>de buena racha</span><div><Award size={19}/><span>Tu mejor<br/><strong>{streak.best} días</strong></span></div></div><p>{streak.message}</p><div className="badge-row">{[3,7,14,30,60,100].map(n=><span className={streak.badges.includes(n)?'earned':''} key={n}><Award size={19}/>{n} días</span>)}</div><div className="calendar-heading"><button className="icon-button" onClick={()=>setMonth(addMonths(month,-1))} aria-label="Mes anterior"><ChevronLeft size={18}/></button><strong>{format(parseISO(month),'MMMM yyyy',{locale:es})}</strong><button className="icon-button" disabled={month>=`${today.slice(0,7)}-01`} onClick={()=>setMonth(addMonths(month,1))} aria-label="Mes siguiente"><ChevronRight size={18}/></button></div><div className="heatmap">{['L','M','X','J','V','S','D'].map((d,i)=><small key={i}>{d}</small>)}{Array.from({length:firstWeekday},(_,i)=><span key={`blank${i}`}/>)}{heatmap.map(day=><span key={day.date} className={`heat-day ${day.status} ${day.confirmed?'confirmed':''}`} title={`${day.date} · ${money(day.amount,c)}${day.confirmed?' · Sin gasto confirmado':''}`}>{Number(day.date.slice(-2))}{day.confirmed&&<small>✓</small>}</span>)}</div><div className="heat-legend"><span><i className="clear"/>Sin gasto</span><span><i className="small"/>Pequeño</span><span><i className="heavy"/>Alto</span></div><p className="footnote">✓ Confirmado con “Hoy no gasté”. Los días suaves también cuentan desde el primer registro.</p><div className="soft-metric"><TrendingDown size={23}/><span>Racha de reducción<strong>{streak.weekly} semanas · {streak.weeklyReductionPercent.toFixed(0)}% menos</strong></span></div><div className="badge-row">{[2,4,8,12].map(n=><span className={streak.weeklyBadges.includes(n)?'earned':''} key={n}><Award size={18}/>{n} sem.</span>)}</div><p className="footnote">Se comparan semanas completas, de lunes a domingo.</p></Card>
- <Card><SectionTitle title="Lo fijo y lo que eliges"/><div className="split-bar"><span style={{width:`${totals.expenses?totals.fixed/totals.expenses*100:50}%`}}/></div><div className="two-stats"><span>Fijo<strong>{money(totals.fixed,c)}</strong></span><span>Variable<strong>{money(totals.variable,c)}</strong></span></div><SectionTitle title="En el calendario"/>{upcoming.length?upcoming.map(r=><div className="payment-row" key={r.id}><span className="date-tile"><strong>{Number(r.proximo_pago.slice(-2))}</strong>{format(parseISO(r.proximo_pago),'MMM',{locale:es})}</span><span><strong>{r.descripcion}</strong><small>{r.frecuencia}{r.proximo_pago<today?' · Vencido':''}</small></span><strong>{money(r.monto,c)}</strong></div>):<p className="empty-inline">Crea pagos recurrentes para tener a la vista lo que viene.</p>}</Card><button className="button secondary full" onClick={share}><Share2 size={17}/>Compartir este panorama</button></div>
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Flame,
+  Leaf,
+  Share2,
+  Award,
+  TrendingDown,
+} from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { es } from "date-fns/locale";
+import { useDrip } from "../context";
+import {
+  addDays,
+  addMonths,
+  filterRecords,
+  getAntExpenses,
+  getCategoryTotals,
+  getCycles,
+  getDebtSummary,
+  getHeatmap,
+  getMonthlySummary,
+  getRepeatedExpenses,
+  getSpendingPatterns,
+  getStreaks,
+  getTagTotals,
+  getTotals,
+  getUnnecessaryGrowth,
+  todayISO,
+} from "../lib/analytics";
+import { money } from "../lib/format";
+import { Card, Empty, SectionTitle } from "../components/ui";
+import {
+  CashChart,
+  DonutChart,
+  SalaryChart,
+  TrendChart,
+} from "../components/Charts";
+export default function Analisis() {
+  const { data, share } = useDrip();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  useEffect(() => {
+    if (params.get("section") === "racha") {
+      const frame = requestAnimationFrame(() =>
+        document.getElementById("racha")?.scrollIntoView({ block: "start" }),
+      );
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [params]);
+  const { registros, config } = data;
+  const today = todayISO();
+  const [period, setPeriod] = useState("cycle");
+  const [month, setMonth] = useState(`${today.slice(0, 7)}-01`);
+  const cycles = getCycles(registros, config, today);
+  const current = cycles.at(-1);
+  const start =
+    period === "30"
+      ? addDays(today, -29)
+      : period === "3"
+        ? addDays(addMonths(today, -3), 1)
+        : period === "year"
+          ? `${today.slice(0, 4)}-01-01`
+          : (current?.start ?? `${today.slice(0, 7)}-01`);
+  const rows = filterRecords(registros, start, today);
+  const totals = getTotals(rows);
+  const monthly = getMonthlySummary(rows);
+  const categoryTotals = getCategoryTotals(rows);
+  const tagTotals = getTagTotals(rows);
+  const ants = getAntExpenses(registros, config, today);
+  const repeated = getRepeatedExpenses(rows);
+  const growth = getUnnecessaryGrowth(registros, start, today);
+  const debt = getDebtSummary(data.deudas, registros, today);
+  const streak = getStreaks(registros, config, today);
+  const heatmap = getHeatmap(registros, config, month, today);
+  const patterns = getSpendingPatterns(rows);
+  const c = config.moneda;
+  const budgetTotals = getCategoryTotals(
+    filterRecords(registros, `${today.slice(0, 7)}-01`, today),
+  );
+  const upcoming = data.recurrentes
+    .filter((r) => r.activa)
+    .sort((a, b) => a.proximo_pago.localeCompare(b.proximo_pago));
+  const maxWeek = Math.max(1, ...patterns.weekdays.map((d) => d.total));
+  const maxDay = Math.max(1, ...patterns.monthDays.map((d) => d.total));
+  const firstWeekday = (parseISO(month).getDay() + 6) % 7;
+  return (
+    <div className="page analysis-page">
+      <div className="page-intro">
+        <span className="eyebrow">MENOS DUDAS. MÁS CLARIDAD.</span>
+        <div className="title-row">
+          <h1>
+            Tu panorama<span className="title-dot">.</span>
+          </h1>
+          <button
+            className="icon-button bordered"
+            onClick={share}
+            aria-label="Compartir análisis"
+          >
+            <Share2 size={19} />
+          </button>
+        </div>
+        <p>Conoce tus hábitos. Haz espacio para tus metas.</p>
+      </div>
+      <div
+        className="period-select"
+        role="group"
+        aria-label="Periodo de análisis"
+      >
+        {[
+          ["cycle", "Este ciclo"],
+          ["30", "30 días"],
+          ["3", "3 meses"],
+          ["year", "Este año"],
+        ].map(([v, l]) => (
+          <button
+            className={period === v ? "active" : ""}
+            key={v}
+            onClick={() => setPeriod(v)}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      <p className="period-label">
+        {format(parseISO(start), "d MMM", { locale: es })} —{" "}
+        {format(parseISO(today), "d MMM yyyy", { locale: es })}
+      </p>
+      {rows.length === 0 && (
+        <Card>
+          <Empty
+            title="Tu panorama necesita algunas gotas"
+            text="Agrega movimientos o activa la demo en Más para explorar cada gráfico."
+          />
+        </Card>
+      )}
+      <div className="summary-grid">
+        <Card>
+          <span className="eyebrow">INGRESOS</span>
+          <strong>{money(totals.income, c)}</strong>
+          <span className="positive">Todo lo que llega</span>
+        </Card>
+        <Card>
+          <span className="eyebrow">GASTOS</span>
+          <strong>{money(totals.expenses, c)}</strong>
+          <span>Todo lo que sale</span>
+        </Card>
+      </div>
+      <Card>
+        <SectionTitle title="Entradas, salidas y planes" />
+        <div className="legend">
+          <span>
+            <i className="lavender" />
+            Ingresos
+          </span>
+          <span>
+            <i />
+            Gastos
+          </span>
+          <span>
+            <i className="green" />
+            Ahorro
+          </span>
+        </div>
+        {monthly.length ? (
+          <CashChart data={monthly} currency={c} />
+        ) : (
+          <p className="empty-inline">
+            El primer registro dibuja el primer punto.
+          </p>
+        )}
+        <div className="soft-metric">
+          <Leaf size={20} />
+          <span>
+            Ahorro neto<strong>{money(totals.savings, c)}</strong>
+          </span>
+        </div>
+      </Card>
+      <Card>
+        <SectionTitle title="De dónde viene tu dinero" />
+        <div className="legend">
+          <span>
+            <i />
+            Sueldo
+          </span>
+          <span>
+            <i className="green" />
+            Adicionales
+          </span>
+        </div>
+        <SalaryChart data={monthly} currency={c} />
+        <div className="two-stats">
+          <span>
+            Sueldo
+            <strong>
+              {money(
+                monthly.reduce((s, m) => s + m.salary, 0),
+                c,
+              )}
+            </strong>
+          </span>
+          <span>
+            Adicionales
+            <strong>
+              {money(
+                monthly.reduce((s, m) => s + m.additional, 0),
+                c,
+              )}
+            </strong>
+          </span>
+        </div>
+      </Card>
+      <Card>
+        <SectionTitle title="En qué se va" eyebrow="GASTOS POR CATEGORÍA" />
+        {categoryTotals.length ? (
+          <DonutChart
+            data={categoryTotals}
+            currency={c}
+            onSelect={(name) =>
+              navigate(`/movimientos?categoria=${encodeURIComponent(name)}`)
+            }
+          />
+        ) : (
+          <p className="empty-inline">
+            Tus categorías aparecerán aquí al registrar gastos.
+          </p>
+        )}
+      </Card>
+      <Card>
+        <SectionTitle
+          title="Un límite que te cuida"
+          eyebrow="PRESUPUESTOS · ESTE MES"
+        />
+        {data.categorias
+          .filter((cat) => cat.activa && cat.presupuesto_mensual > 0)
+          .map((cat) => {
+            const spent =
+              budgetTotals.find((t) => t.name === cat.nombre)?.total ?? 0;
+            return (
+              <div className="budget" key={cat.id}>
+                <div>
+                  <span>{cat.nombre}</span>
+                  <strong>
+                    {Math.round((spent / cat.presupuesto_mensual) * 100)}%
+                  </strong>
+                </div>
+                <div
+                  className={`progress ${spent > cat.presupuesto_mensual ? "over" : ""}`}
+                >
+                  <span
+                    style={{
+                      width: `${Math.min(100, (spent / cat.presupuesto_mensual) * 100)}%`,
+                      background:
+                        spent > cat.presupuesto_mensual ? "#CC5454" : cat.color,
+                    }}
+                  />
+                </div>
+                <small>
+                  {money(spent, c)} de {money(cat.presupuesto_mensual, c)}
+                </small>
+              </div>
+            );
+          })}
+        {!data.categorias.some((cat) => cat.presupuesto_mensual > 0) && (
+          <p className="empty-inline">
+            Define un presupuesto en{" "}
+            <Link to="/mas?section=categorias">Más → Categorías</Link> y sigue
+            tu progreso.
+          </p>
+        )}
+      </Card>
+      <Card>
+        <SectionTitle title="Tus gastos, en palabras" eyebrow="TAGS" />
+        <div className="tag-ranking">
+          {tagTotals.map((t) => (
+            <Link
+              to={`/movimientos?tag=${encodeURIComponent(t.name)}`}
+              key={t.name}
+            >
+              <span>#{t.name}</span>
+              <strong>{money(t.total, c)}</strong>
+            </Link>
+          ))}
+        </div>
+        {!tagTotals.length && (
+          <p className="empty-inline">
+            Añade tags como “juntos” o “antojo” a tus movimientos.
+          </p>
+        )}
+        <p className="footnote">
+          Un movimiento puede tener varios tags; sus totales no se suman entre
+          sí.
+        </p>
+      </Card>
+      <Card className="ant-card">
+        <SectionTitle
+          title="Pequeños gastos, gran efecto"
+          eyebrow="GASTOS HORMIGA · ÚLTIMOS 30 DÍAS"
+        />
+        <div className="large-metric">{money(ants.total, c)}</div>
+        <p>
+          Al mismo ritmo serían{" "}
+          <strong>{money(ants.annualProjection, c)}</strong> en un año.
+        </p>
+        {ants.items.map((item) => (
+          <div className="rank-row" key={item.key}>
+            <div>
+              <strong>{item.label}</strong>
+              <span>
+                {item.count} veces · {money(item.average, c)} en promedio
+              </span>
+            </div>
+            <strong>{money(item.total, c)}</strong>
+          </div>
+        ))}
+        {!ants.items.length && (
+          <p className="empty-inline">
+            No detectamos pequeños gastos repetidos en los últimos 30 días.
+          </p>
+        )}
+      </Card>
+      <Card>
+        <SectionTitle title="Los que siempre vuelven" eyebrow="MÁS REPETIDOS" />
+        {repeated.slice(0, 8).map((r, i) => (
+          <div className="rank-row" key={r.key}>
+            <span className="rank-number">
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <div>
+              <strong>{r.label}</strong>
+              <span>
+                {r.count} veces · prom. {money(r.average, c)}
+              </span>
+              <span>
+                Último: {format(parseISO(r.lastDate), "d MMM", { locale: es })}
+              </span>
+            </div>
+            <strong>{money(r.total, c)}</strong>
+          </div>
+        ))}
+        {!repeated.length && (
+          <p className="empty-inline">
+            Aún no hay gastos repetidos en este periodo.
+          </p>
+        )}
+      </Card>
+      <Card>
+        <SectionTitle
+          title="¿Gustos o costumbres?"
+          eyebrow="GASTOS INNECESARIOS"
+        />
+        <div className="metric-row">
+          <strong className="large-metric">{money(growth.current, c)}</strong>
+          <span
+            className={`growth-badge ${(growth.percent ?? 0) <= 0 ? "positive" : "danger-text"}`}
+          >
+            {growth.percent === null
+              ? "Sin base previa"
+              : `${growth.percent > 0 ? "+" : ""}${growth.percent.toFixed(1)}%`}
+          </span>
+        </div>
+        <p className="footnote">
+          Comparado con el periodo anterior de la misma duración.
+        </p>
+        <TrendChart
+          data={monthly}
+          dataKey="unnecessary"
+          label="Gastos innecesarios"
+          currency={c}
+        />
+      </Card>
+      <Card>
+        <SectionTitle title="Más cerca de estar libre" eyebrow="TUS DEUDAS" />
+        <div className="large-metric">{money(debt.balance, c)}</div>
+        <p className="footnote">
+          Saldo estimado al {format(parseISO(today), "d MMM", { locale: es })} ·{" "}
+          {debt.growthPercent === null
+            ? "sin base anterior"
+            : `${debt.growthPercent > 0 ? "+" : ""}${debt.growthPercent.toFixed(1)}% frente al cierre anterior`}
+        </p>
+        {debt.history.length > 0 && (
+          <TrendChart
+            data={debt.history
+              .filter((d) => d.date >= start)
+              .map((d) => ({
+                ...d,
+                label: format(parseISO(d.date), "MMM", { locale: es }),
+              }))}
+            dataKey="balance"
+            label="Saldo de deuda"
+            currency={c}
+          />
+        )}
+        <div className="two-stats">
+          <span>
+            Abonos acumulados<strong>{money(debt.payments, c)}</strong>
+          </span>
+          <span>
+            Interés estimado<strong>{money(debt.interest, c)}</strong>
+          </span>
+        </div>
+        <div className="note">
+          {debt.balance === 0
+            ? "Un saldo en cero. Un poco más de tranquilidad."
+            : debt.payoffDate
+              ? `Con las cuotas actuales, podrías terminar en ${format(parseISO(debt.payoffDate), "MMMM yyyy", { locale: es })}.`
+              : "La cuota actual no permite estimar una fecha de liberación. Revisa tus deudas."}
+        </div>
+        <p className="footnote">
+          Estimación mensual, sin comisiones ni movimientos futuros. El estado
+          de tu acreedor es la referencia.
+        </p>
+        <Link className="text-link" to="/mas?section=deudas">
+          Administrar deudas <ChevronRight size={14} />
+        </Link>
+      </Card>
+      <Card>
+        <SectionTitle title="Cada ciclo, una oportunidad" />
+        {cycles
+          .filter((cycle) => cycle.end >= start)
+          .slice(-12)
+          .map((cycle) => (
+            <div className="cycle-row" key={cycle.id}>
+              <strong>{cycle.label}</strong>
+              <div>
+                <span>Gastado {money(cycle.expenses, c)}</span>
+                <span>Ahorro {money(cycle.savings, c)}</span>
+              </div>
+              <span>{cycle.spentPercent.toFixed(0)}%</span>
+            </div>
+          ))}
+        <p className="footnote">
+          El porcentaje compara los gastos con todos los ingresos de cada ciclo.
+        </p>
+      </Card>
+      <Card>
+        <SectionTitle title="Los días de más movimiento" />
+        <div className="weekday-chart">
+          {patterns.weekdays.map((d) => (
+            <div key={d.day}>
+              <strong>{money(d.total, c)}</strong>
+              <span style={{ height: Math.max(3, (d.total / maxWeek) * 80) }} />
+              <small>{d.label.slice(0, 3)}</small>
+            </div>
+          ))}
+        </div>
+        <p className="field-heading">Día del mes</p>
+        <div className="month-spending">
+          {patterns.monthDays.map((d) => (
+            <span
+              key={d.day}
+              title={`Día ${d.day}: ${money(d.total, c)}`}
+              aria-label={`Día ${d.day}: ${money(d.total, c)}`}
+              style={{
+                background: `rgba(97,91,234,${0.05 + (d.total / maxDay) * 0.8})`,
+                color: d.total / maxDay > 0.6 ? "white" : "#494865",
+              }}
+            >
+              {d.day}
+            </span>
+          ))}
+        </div>
+      </Card>
+      <Card>
+        <div id="racha" />
+        <SectionTitle
+          title="Tu constancia merece celebrarse"
+          eyebrow="DÍAS SIN GASTAR"
+        />
+        <div className="streak-summary">
+          <Flame size={38} />
+          <strong>{streak.current}</strong>
+          <span>
+            días
+            <br />
+            de buena racha
+          </span>
+          <div>
+            <Award size={19} />
+            <span>
+              Tu mejor
+              <br />
+              <strong>{streak.best} días</strong>
+            </span>
+          </div>
+        </div>
+        <p>{streak.message}</p>
+        <div className="badge-row">
+          {[3, 7, 14, 30, 60, 100].map((n) => (
+            <span className={streak.badges.includes(n) ? "earned" : ""} key={n}>
+              <Award size={19} />
+              {n} días
+            </span>
+          ))}
+        </div>
+        <div className="calendar-heading">
+          <button
+            className="icon-button"
+            onClick={() => setMonth(addMonths(month, -1))}
+            aria-label="Mes anterior"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <strong>
+            {format(parseISO(month), "MMMM yyyy", { locale: es })}
+          </strong>
+          <button
+            className="icon-button"
+            disabled={month >= `${today.slice(0, 7)}-01`}
+            onClick={() => setMonth(addMonths(month, 1))}
+            aria-label="Mes siguiente"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <div className="heatmap">
+          {["L", "M", "X", "J", "V", "S", "D"].map((d, i) => (
+            <small key={i}>{d}</small>
+          ))}
+          {Array.from({ length: firstWeekday }, (_, i) => (
+            <span key={`blank${i}`} />
+          ))}
+          {heatmap.map((day) => (
+            <span
+              key={day.date}
+              className={`heat-day ${day.status} ${day.confirmed ? "confirmed" : ""}`}
+              title={`${day.date} · ${money(day.amount, c)}${day.confirmed ? " · Sin gasto confirmado" : ""}`}
+            >
+              {Number(day.date.slice(-2))}
+              {day.confirmed && <small>✓</small>}
+            </span>
+          ))}
+        </div>
+        <div className="heat-legend">
+          <span>
+            <i className="clear" />
+            Sin gasto
+          </span>
+          <span>
+            <i className="small" />
+            Pequeño
+          </span>
+          <span>
+            <i className="heavy" />
+            Alto
+          </span>
+        </div>
+        <p className="footnote">
+          ✓ Confirmado con “Hoy no gasté”. Los días suaves también cuentan desde
+          el primer registro.
+        </p>
+        <div className="soft-metric">
+          <TrendingDown size={23} />
+          <span>
+            Racha de reducción
+            <strong>
+              {streak.weekly} semanas ·{" "}
+              {streak.weeklyReductionPercent.toFixed(0)}% menos
+            </strong>
+          </span>
+        </div>
+        <div className="badge-row">
+          {[2, 4, 8, 12].map((n) => (
+            <span
+              className={streak.weeklyBadges.includes(n) ? "earned" : ""}
+              key={n}
+            >
+              <Award size={18} />
+              {n} sem.
+            </span>
+          ))}
+        </div>
+        <p className="footnote">
+          Se comparan semanas completas, de lunes a domingo.
+        </p>
+      </Card>
+      <Card>
+        <SectionTitle title="Lo fijo y lo que eliges" />
+        <div className="split-bar">
+          <span
+            style={{
+              width: `${totals.expenses ? (totals.fixed / totals.expenses) * 100 : 0}%`,
+            }}
+          />
+        </div>
+        <div className="two-stats">
+          <span>
+            Fijo<strong>{money(totals.fixed, c)}</strong>
+          </span>
+          <span>
+            Variable<strong>{money(totals.variable, c)}</strong>
+          </span>
+        </div>
+        <SectionTitle title="En el calendario" />
+        {upcoming.length ? (
+          upcoming.map((r) => (
+            <div className="payment-row" key={r.id}>
+              <span className="date-tile">
+                <strong>{Number(r.proximo_pago.slice(-2))}</strong>
+                {format(parseISO(r.proximo_pago), "MMM", { locale: es })}
+              </span>
+              <span>
+                <strong>{r.descripcion}</strong>
+                <small>
+                  {r.frecuencia}
+                  {r.proximo_pago < today ? " · Vencido" : ""}
+                </small>
+              </span>
+              <strong>{money(r.monto, c)}</strong>
+            </div>
+          ))
+        ) : (
+          <p className="empty-inline">
+            Crea pagos recurrentes para tener a la vista lo que viene.
+          </p>
+        )}
+      </Card>
+      <button className="button secondary full" onClick={share}>
+        <Share2 size={17} />
+        Compartir este panorama
+      </button>
+    </div>
+  );
 }

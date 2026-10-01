@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Config, Deuda, Registro } from '../src/types';
 import { DEFAULT_CONFIG } from '../src/lib/defaults';
 import { createDemoData } from '../src/lib/demo';
 import {
   addDays, addMonths, getAntExpenses, getCategoryTotals, getCycles, getDebtSummary, getHeatmap,
   getMonthlySummary, getRepeatedExpenses, getSpendingPatterns, getStreaks, getTagTotals,
-  getTotals, getUnnecessaryGrowth, growthPercent, inferSalaryPeriod, normalizeDescription,
+  getTotals, getUnnecessaryGrowth, growthPercent, inferSalaryPeriod, normalizeDescription, todayISO,
 } from '../src/lib/analytics';
 
 const cfg = (overrides: Partial<Config> = {}): Config => ({ ...DEFAULT_CONFIG, ...overrides });
@@ -21,6 +21,13 @@ const debt: Deuda = { id: 'loan', nombre: 'Préstamo', acreedor: 'Ejemplo', mont
   tasa_interes_mensual: 10, fecha_inicio: '2026-01-01', cuota_minima: 200, dia_pago: 1, activa: true };
 
 describe('calendar dates and normalized descriptions', () => {
+  it('uses the Bogota day even when UTC has passed midnight', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-01T03:59:00.000Z'));
+      expect(todayISO()).toBe('2026-09-30');
+    } finally { vi.useRealTimers(); }
+  });
   it('preserves calendar dates across leap years, month ends and DST boundaries', () => {
     expect(addDays('2024-02-28', 1)).toBe('2024-02-29');
     expect(addDays('2026-03-08', 1)).toBe('2026-03-09');

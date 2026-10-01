@@ -2,20 +2,25 @@ const SPREADSHEET_ID = '1Qzzvv2ObVMYdN9rQRSHYEwEdhlfKH262nM0trH4YBpY'; /*NO MODI
 const SHEET_NAME = 'Registros';
 const API_TOKEN = 'CAMBIA_ESTE_TOKEN_LARGO'; // Reemplazar SOLO en Apps Script, mínimo 24 caracteres.
 const TIMEZONE = 'America/Bogota';
+const API_VERSION = 'Drip_API:V:0.0.0.02'; // V:0.0.0.01 no tenía Usuarios ni usuario_id en Registros.
 
 /* Drip — Daily Records for Individuals & Partners.
  * Único archivo del backend. Publicar como Web App: ejecutar como Yo,
  * acceso Cualquier usuario. El token del dispositivo autentica todos los POST.
  * Los intereses son porcentajes: tasa_interes_mensual = 2 significa 2 %.
+ * Desde V:0.0.0.02 el libro admite varios usuarios: el token sigue siendo el
+ * acceso compartido del dispositivo y cada persona además inicia sesión con
+ * su correo y contraseña, guardados y validados únicamente en Usuarios.
  */
 const HEADERS_ = {
-  registros: ['id', 'fecha', 'tipo', 'subtipo', 'monto', 'categoria', 'tags', 'descripcion', 'metodo_pago', 'necesidad', 'recurrente_id', 'deuda_id', 'creado_en', 'actualizado_en', 'eliminado'],
+  registros: ['id', 'fecha', 'tipo', 'subtipo', 'monto', 'categoria', 'tags', 'descripcion', 'metodo_pago', 'necesidad', 'recurrente_id', 'deuda_id', 'creado_en', 'actualizado_en', 'eliminado', 'usuario_id'],
   categorias: ['id', 'nombre', 'tipo', 'color', 'icono', 'presupuesto_mensual', 'activa'],
   deudas: ['id', 'nombre', 'acreedor', 'monto_inicial', 'tasa_interes_mensual', 'fecha_inicio', 'cuota_minima', 'dia_pago', 'activa'],
   recurrentes: ['id', 'descripcion', 'monto', 'categoria', 'tags', 'frecuencia', 'dia', 'proximo_pago', 'metodo_pago', 'activa'],
-  config: ['clave', 'valor']
+  config: ['clave', 'valor'],
+  usuarios: ['id', 'nombre', 'correo', 'password_hash', 'salt', 'creado_en']
 };
-const TABLE_NAMES_ = { registros: SHEET_NAME, categorias: 'Categorias', deudas: 'Deudas', recurrentes: 'Recurrentes', config: 'Config' };
+const TABLE_NAMES_ = { registros: SHEET_NAME, categorias: 'Categorias', deudas: 'Deudas', recurrentes: 'Recurrentes', config: 'Config', usuarios: 'Usuarios' };
 const DEFAULT_CONFIG_ = { moneda: 'COP', umbral_hormiga: 20000, min_repeticiones_hormiga: 3, tipo_ciclo: 'auto', dia_corte: 1, excluir_fijos_de_racha: true, meta_reduccion_semanal_pct: 0 };
 const TIPOS_ = ['ingreso', 'gasto', 'deuda_aumento', 'deuda_pago', 'sin_gasto'];
 const METODOS_ = ['efectivo', 'debito', 'credito', 'transferencia', 'otro'];
@@ -31,12 +36,12 @@ function setup() {
     ensureSchema_();
     Object.keys(TABLE_NAMES_).forEach(function (key) { formatSheet_(sheet_(TABLE_NAMES_[key]), key); });
     SpreadsheetApp.flush();
-    return { ok: true, message: 'Drip está listo. Implementa como aplicación web y copia la URL /exec.' };
+    return { ok: true, message: 'Drip ' + API_VERSION + ' está listo. Implementa como aplicación web y copia la URL /exec.' };
   } finally { lock.releaseLock(); }
 }
 
-// La prueba de vida no abre la hoja ni revela configuración o datos.
-function doGet(e) { return ok_({ service: 'finanzas' }, true); }
+// La prueba de vida no abre la hoja ni revela configuración, usuarios ni datos.
+function doGet(e) { return json_({ ok: true, service: 'finanzas', version: API_VERSION }); }
 
 function doPost(e) {
   let lock;
@@ -49,7 +54,7 @@ function doPost(e) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw apiError_('BAD_REQUEST', 'La petición debe ser un objeto.');
     if (API_TOKEN.length < 24 || API_TOKEN === 'CAMBIA_ESTE_TOKEN_LARGO') throw apiError_('SERVER_NOT_CONFIGURED', 'Configura un token aleatorio de al menos 24 caracteres en Apps Script.');
     if (typeof p.token !== 'string' || !sameToken_(p.token, API_TOKEN)) return fail_('UNAUTHORIZED', 'Token de acceso incorrecto.');
-    const handlers = { list: handleList_, upsert: handleUpsert_, batch: handleBatch_, delete: handleDelete_, saveEntity: handleSaveEntity_, saveConfig: handleSaveConfig_, materializeRecurrentes: handleMaterialize_ };
+    const handlers = { list: handleList_, upsert: handleUpsert_, batch: handleBatch_, delete: handleDelete_, saveEntity: handleSaveEntity_, saveConfig: handleSaveConfig_, materializeRecurrentes: handleMaterialize_, register: handleRegister_, login: handleLogin_ };
     if (!Object.prototype.hasOwnProperty.call(handlers, p.action)) throw apiError_('UNKNOWN_ACTION', 'Acción no reconocida.');
     // También bloqueamos las lecturas: esquema, semillas y cursor consistente
     // requieren escritura, y no se debe leer un batch parcialmente aplicado.
@@ -66,20 +71,28 @@ function doPost(e) {
 
 function ensureSchema_() {
   const book = book_();
+  const created = [];
   Object.keys(TABLE_NAMES_).forEach(function (key) {
     let sheet = book.getSheetByName(TABLE_NAMES_[key]);
     const headers = HEADERS_[key];
     if (!sheet) sheet = book.insertSheet(TABLE_NAMES_[key]);
     if (sheet.getLastRow() === 0) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      formatSheet_(sheet, key);
+      created.push(key);
     } else {
-      const current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-      if (headers.some(function (header, i) { return current[i] !== header; })) {
+      const width = sheet.getLastColumn();
+      const current = sheet.getRange(1, 1, 1, Math.max(width, headers.length)).getValues()[0];
+      // V:0.0.0.01 no tenía usuario_id: se agrega la columna sin tocar filas existentes.
+      if (key === 'registros' && width === headers.length - 1 && headers.slice(0, -1).every(function (header, i) { return current[i] === header; })) {
+        sheet.getRange(1, headers.length, 1, 1).setValues([[headers[headers.length - 1]]]);
+      } else if (headers.some(function (header, i) { return current[i] !== header; })) {
         throw apiError_('SCHEMA_MISMATCH', 'Encabezados inesperados en ' + TABLE_NAMES_[key] + '. Conserva el orden documentado antes de continuar.');
       }
     }
   });
+  // Primero existen todas las pestañas; así la validación de categorías
+  // también queda instalada cuando el primer POST crea la hoja automáticamente.
+  created.forEach(function (key) { formatSheet_(sheet_(TABLE_NAMES_[key]), key); });
   if (sheet_('Categorias').getLastRow() === 1) {
     const seeds = [
       ['sueldo', 'Sueldo', 'ingreso', '#10b981', 'Wallet'], ['extra', 'Ingreso extra', 'ingreso', '#34d399', 'Sparkles'],
@@ -276,6 +289,29 @@ function handleMaterialize_() {
   return { registros: generated, recurrentes: templates, pending: templates.some(function (r) { return r.activa && r.proximo_pago <= today; }), serverTime: nowIso_() };
 }
 
+function handleRegister_(p) {
+  const nombre = text_(p.nombre, 'nombre', 120, true);
+  const correo = email_(p.correo);
+  const password = password_(p.password);
+  const rows = table_('usuarios');
+  if (rows.some(function (row) { return row.correo === correo; })) throw apiError_('DUPLICATE_USER', 'Ya existe una cuenta con ese correo.');
+  const salt = uuid_();
+  const row = { id: uuid_(), nombre: nombre, correo: correo, password_hash: hashPassword_(password, salt), salt: salt, creado_en: nowIso_() };
+  rows.push(row);
+  writeChanges_('usuarios', rows, [rows.length - 1]);
+  // Nunca se devuelve el hash, la sal ni el resto de la hoja de usuarios.
+  return { id: row.id, nombre: row.nombre, correo: row.correo };
+}
+
+function handleLogin_(p) {
+  const correo = email_(p.correo);
+  const password = text_(p.password, 'password', 200, true);
+  const user = table_('usuarios').find(function (row) { return row.correo === correo; });
+  // Un mensaje genérico evita confirmar si el correo existe en el libro.
+  if (!user || !sameToken_(hashPassword_(password, user.salt), user.password_hash)) throw apiError_('UNAUTHORIZED', 'Correo o contraseña incorrectos.');
+  return { id: user.id, nombre: user.nombre, correo: user.correo };
+}
+
 function validate_(value, ctx) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw apiError_('VALIDATION_ERROR', 'registro debe ser un objeto.');
   const row = {
@@ -287,7 +323,8 @@ function validate_(value, ctx) {
     metodo_pago: enum_(value.metodo_pago || 'otro', METODOS_, 'metodo_pago'),
     necesidad: text_(value.necesidad || '', 'necesidad', 20, false),
     recurrente_id: value.recurrente_id ? id_(value.recurrente_id) : '', deuda_id: value.deuda_id ? id_(value.deuda_id) : '',
-    creado_en: '', actualizado_en: '', eliminado: value.eliminado === undefined ? false : bool_(value.eliminado, 'eliminado')
+    creado_en: '', actualizado_en: '', eliminado: value.eliminado === undefined ? false : bool_(value.eliminado, 'eliminado'),
+    usuario_id: value.usuario_id ? id_(value.usuario_id) : ''
   };
   if (row.tipo === 'ingreso') enum_(row.subtipo, ['sueldo', 'adicional'], 'subtipo');
   else if (row.tipo === 'gasto') { enum_(row.subtipo, ['variable', 'fijo'], 'subtipo'); enum_(row.necesidad, ['necesario', 'innecesario'], 'necesidad'); }
@@ -400,6 +437,19 @@ function text_(value, field, max, required) {
   return clean;
 }
 function id_(value) { const id = text_(value, 'id', 200, true); if (!/^[a-zA-Z0-9_.:\-]+$/.test(id)) throw apiError_('VALIDATION_ERROR', 'ID inválido.'); return id; }
+function email_(value) {
+  const clean = text_(value, 'correo', 180, true).toLocaleLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) throw apiError_('VALIDATION_ERROR', 'correo debe ser una dirección válida.');
+  return clean;
+}
+function password_(value) {
+  if (typeof value !== 'string' || !/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9\s]).{9,200}$/.test(value)) throw apiError_('VALIDATION_ERROR', 'La contraseña debe superar 8 caracteres alfanuméricos e incluir un carácter especial.');
+  return value;
+}
+function hashPassword_(password, salt) {
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, password + ':' + salt, Utilities.Charset.UTF_8);
+  return Utilities.base64Encode(digest);
+}
 function enum_(value, options, field) { if (options.indexOf(value) < 0) throw apiError_('VALIDATION_ERROR', 'Valor inválido para ' + field + '.'); return value; }
 function number_(value, field, min, max) { if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw apiError_('VALIDATION_ERROR', field + ' debe ser un número entre ' + min + ' y ' + max + '.'); return value; }
 function integer_(value, field, min, max) { number_(value, field, min, max); if (!Number.isInteger(value)) throw apiError_('VALIDATION_ERROR', field + ' debe ser entero.'); return value; }
@@ -419,6 +469,6 @@ function nowIso_(minimum) {
   return new Date(current).toISOString();
 }
 function apiError_(code, message) { const error = new Error(message); error.apiCode = code; return error; }
-function ok_(data, health) { return json_(health ? { ok: true, service: 'finanzas' } : { ok: true, data: data }); }
+function ok_(data) { return json_({ ok: true, data: data }); }
 function fail_(code, message) { return json_({ ok: false, error: code, message: message }); }
 function json_(value) { return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON); }

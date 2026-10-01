@@ -4,9 +4,13 @@ import type { Config, Deuda, Registro } from '../types';
 const DAY = 86_400_000;
 const parse = (date: string): Date => new Date(`${date.slice(0, 10)}T00:00:00.000Z`);
 const iso = (date: Date): string => date.toISOString().slice(0, 10);
-export const todayISO = (): string => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(new Date());
+export const todayISO = (): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: string): string => parts.find(value => value.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
 export const addDays = (date: string, days: number): string => iso(new Date(parse(date).getTime() + days * DAY));
 export const daysBetween = (start: string, end: string): number => Math.round((parse(end).getTime() - parse(start).getTime()) / DAY);
 const monthStart = (date: string): string => `${date.slice(0, 7)}-01`;
