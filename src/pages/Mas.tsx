@@ -140,6 +140,21 @@ export default function Mas() {
               <ShieldCheck size={15} /> Tus datos, en tu hoja.
             </span>
           </Card>
+          {!isDemo && user && (
+            <Card>
+              <h2>Tu cuenta</h2>
+              <p className="muted">
+                {user.nombre} · {user.correo}
+              </p>
+              <button
+                className="button secondary full"
+                onClick={() => setUser(null)}
+              >
+                <LogOut size={17} />
+                Cerrar sesión
+              </button>
+            </Card>
+          )}
           <Card className="menu-card">
             {[
               {
@@ -427,21 +442,6 @@ export default function Mas() {
               Mantiene sus identificadores para evitar duplicados.
             </p>
           </Card>
-          {!isDemo && user && (
-            <Card>
-              <h2>Tu cuenta</h2>
-              <p className="muted">
-                {user.nombre} · {user.correo}
-              </p>
-              <button
-                className="button secondary full"
-                onClick={() => setUser(null)}
-              >
-                <LogOut size={17} />
-                Cerrar sesión
-              </button>
-            </Card>
-          )}
           <Card>
             <h2>Tus preferencias</h2>
             <form

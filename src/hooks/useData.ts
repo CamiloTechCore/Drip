@@ -3,10 +3,12 @@ import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/
 import * as client from '../api/client';
 import { EMPTY_DATA } from '../lib/defaults';
 import { useSettings } from '../store/settings';
+import { useAuth } from '../store/auth';
 import type { Config, Entity, EntityName, Registro } from '../types';
 
 export function useData() {
   const settings = useSettings();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [account, setAccount] = useState<client.Account | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,13 @@ export function useData() {
     window.addEventListener('online', run);
     const visible = () => { if (document.visibilityState === 'visible') run(); };
     document.addEventListener('visibilitychange', visible);
-    return () => { window.removeEventListener('online', run); document.removeEventListener('visibilitychange', visible); };
+    // Reintenta periódicamente para que una cola pendiente no dependa de reabrir la app o recuperar la red.
+    const interval = setInterval(run, 60000);
+    return () => {
+      window.removeEventListener('online', run);
+      document.removeEventListener('visibilitychange', visible);
+      clearInterval(interval);
+    };
   }, [account, sync]);
 
   const requireAccount = useCallback(() => {
@@ -53,8 +61,10 @@ export function useData() {
     if (account && !account.settings.isDemo && account.settings.url && navigator.onLine) void sync().catch(() => undefined);
   }, [account, queryClient, queryKey, sync]);
   const saveRegistro = useCallback(async (registro: Registro) => {
-    await client.saveRegistro(requireAccount(), registro); await afterLocalWrite();
-  }, [requireAccount, afterLocalWrite]);
+    // Conserva quién lo creó originalmente; solo atribuye registros nuevos sin usuario_id.
+    const owned = registro.usuario_id ? registro : { ...registro, usuario_id: user?.id ?? '' };
+    await client.saveRegistro(requireAccount(), owned); await afterLocalWrite();
+  }, [requireAccount, afterLocalWrite, user]);
   const deleteRegistro = useCallback(async (id: string) => {
     await client.deleteRegistro(requireAccount(), id); await afterLocalWrite();
   }, [requireAccount, afterLocalWrite]);

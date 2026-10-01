@@ -1,7 +1,7 @@
 const SPREADSHEET_ID = '1Qzzvv2ObVMYdN9rQRSHYEwEdhlfKH262nM0trH4YBpY'; /*NO MODIFICAR*/
 const SHEET_NAME = 'Registros';
 const TIMEZONE = 'America/Bogota';
-const API_VERSION = 'Drip_API:V:0.0.0.03'; // V:0.0.0.02 todavía exigía un token de dispositivo compartido.
+const API_VERSION = 'Drip_API:V:0.0.0.05'; // V:0.0.0.04 nunca sembraba categorías: getLastRow() se inflaba por casillas en FALSE.
 
 /* Drip — Daily Records for Individuals & Partners.
  * Único archivo del backend. Publicar como Web App: ejecutar como Yo,
@@ -88,7 +88,9 @@ function ensureSchema_() {
   // Primero existen todas las pestañas; así la validación de categorías
   // también queda instalada cuando el primer POST crea la hoja automáticamente.
   created.forEach(function (key) { formatSheet_(sheet_(TABLE_NAMES_[key]), key); });
-  if (sheet_('Categorias').getLastRow() === 1) {
+  // No uses getLastRow(): la casilla de 'activa' deja FALSE en cientos de filas
+  // vacías al formatear, e infla getLastRow() antes de sembrar las categorías.
+  if (table_('categorias').length === 0) {
     const seeds = [
       ['sueldo', 'Sueldo', 'ingreso', '#10b981', 'Wallet'], ['extra', 'Ingreso extra', 'ingreso', '#34d399', 'Sparkles'],
       ['vivienda', 'Vivienda', 'gasto', '#6366f1', 'House'], ['servicios', 'Servicios', 'gasto', '#818cf8', 'Zap'],
@@ -373,12 +375,28 @@ function book_() {
   return bookCache_;
 }
 function sheet_(name) { const result = book_().getSheetByName(name); if (!result) throw apiError_('SCHEMA_MISMATCH', 'Falta una pestaña. Ejecuta setup().'); return result; }
+// Una celda con casilla (activa/eliminado) sin escribir vale FALSE en Sheets, no '';
+// sin esto, una fila nunca usada se confunde con una fila corrupta por tener datos.
+function isBlankRow_(row, headers) {
+  return row.every(function (value, i) { return BOOLEAN_FIELDS_.indexOf(headers[i]) >= 0 ? (value === '' || value === false) : value === ''; });
+}
 function table_(key) {
+  const headers = HEADERS_[key];
   const rows = sheet_(TABLE_NAMES_[key]).getDataRange().getValues().slice(1);
   // No comprimir huecos: cambiaría los índices y podría sobrescribir otra fila.
-  while (rows.length && rows[rows.length - 1].every(function (value) { return value === ''; })) rows.pop();
-  const blank = rows.findIndex(function (row) { return !row[0]; });
-  if (blank >= 0) throw apiError_('SCHEMA_MISMATCH', 'Hay una fila sin ID/clave en ' + TABLE_NAMES_[key] + ' (fila ' + (blank + 2) + '). Corrige la hoja antes de sincronizar.');
+  while (rows.length && isBlankRow_(rows[rows.length - 1], headers)) rows.pop();
+  // 'id' (columna A, row[0]) es la clave que HEADERS_[key] espera en cada fila; blank === sin ID/clave.
+  const eliminadoIndex = headers.indexOf('eliminado');
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row[0]) continue;
+    // Solo en Registros, una fila totalmente vacía (resto de columnas también vacías) se
+    // trata como un borrado lógico en vez de bloquear la sincronización de todo el libro;
+    // conserva su posición para no desplazar los índices de las demás filas.
+    if (key !== 'registros' || !isBlankRow_(row, headers)) throw apiError_('SCHEMA_MISMATCH', 'Hay una fila sin ID/clave en ' + TABLE_NAMES_[key] + ' (fila ' + (i + 2) + '). Corrige la hoja antes de sincronizar.');
+    row[0] = 'blank-row-' + (i + 2);
+    if (eliminadoIndex >= 0) row[eliminadoIndex] = true;
+  }
   return rows.map(function (row) { return rowToObj_(row, HEADERS_[key]); });
 }
 function rowToObj_(row, headers) {

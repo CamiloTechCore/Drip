@@ -32,7 +32,18 @@ class Sheet {
         return range;
       },
       setBackground: () => range, setFontColor: () => range, setFontWeight: () => range,
-      setNumberFormat: () => range, setDataValidation: () => range,
+      setNumberFormat: () => range,
+      setDataValidation: (validation?: { checkbox?: boolean }) => {
+        // Sheets reales dejan FALSE (no '') en una celda con casilla nunca escrita.
+        if (validation?.checkbox) {
+          for (let r = 0; r < rowCount; r++) {
+            const index = start - 1 + r;
+            this.values[index] ??= [];
+            if (this.values[index][col - 1] === undefined || this.values[index][col - 1] === '') this.values[index][col - 1] = false;
+          }
+        }
+        return range;
+      },
     };
     return range;
   }
@@ -44,7 +55,8 @@ function harness() {
   let rangeValidations = 0;
   const sheets = new Map<string, Sheet>();
   const properties = new Map<string, string>();
-  const rule = { requireValueInList: () => rule, requireValueInRange: () => { rangeValidations++; return rule; }, setAllowInvalid: () => rule, requireCheckbox: () => rule, build: () => ({}) };
+  const rule = { requireValueInList: () => rule, requireValueInRange: () => { rangeValidations++; return rule; }, setAllowInvalid: () => rule, requireCheckbox: () => checkboxRule, build: () => ({}) };
+  const checkboxRule = { requireValueInList: () => rule, requireValueInRange: () => rule, setAllowInvalid: () => checkboxRule, requireCheckbox: () => checkboxRule, build: () => ({ checkbox: true }) };
   const source = readFileSync(new URL('../backend/Code.gs', import.meta.url), 'utf8')
     // Substitute declarations only in memory; configured user constants remain untouched on disk.
     .replace(/^const SPREADSHEET_ID = '[^']*';/m, "const SPREADSHEET_ID = 'test-sheet-id';");
@@ -98,7 +110,7 @@ describe('single-file Apps Script API', () => {
 
   it('keeps health public and rejects unknown actions before opening or writing the sheet', () => {
     const api = harness();
-    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.03' });
+    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.05' });
     expect(api.post({ action: 'not-a-real-action' }).error).toBe('UNKNOWN_ACTION');
     expect(api.sheets.size).toBe(0);
     expect(api.lockCount).toBe(0);
@@ -235,9 +247,62 @@ describe('single-file Apps Script API', () => {
     const api = harness();
     api.post({ action: 'upsert', registro: expense() });
     const sheet = api.sheets.get('Registros')!;
+    const realRow = sheet.values[1].slice();
     sheet.values[0][1] = 'renamed';
     expect(api.post({ action: 'list' }).error).toBe('SCHEMA_MISMATCH');
-    expect(sheet.values).toHaveLength(2);
+    expect(sheet.values[1]).toEqual(realRow);
+  });
+
+  it('treats a fully blank row in Registros as a logical deletion instead of blocking sync', () => {
+    const api = harness();
+    api.post({ action: 'upsert', registro: expense() });
+    api.post({ action: 'upsert', registro: expense({ id: 'expense-2', actualizado_en: '2026-09-30T15:00:01.000Z' }) });
+    const sheet = api.sheets.get('Registros')!;
+    sheet.values.splice(2, 0, Array(sheet.values[0].length).fill(''));
+    const listed = api.post<DataSet>({ action: 'list' });
+    expect(listed.ok).toBe(true);
+    expect(listed.data.registros.filter(r => !r.eliminado)).toHaveLength(2);
+    expect(listed.data.registros.some(r => r.eliminado && r.id.startsWith('blank-row-'))).toBe(true);
+  });
+
+  it('still blocks sync for a partially filled row missing its id in Registros', () => {
+    const api = harness();
+    api.post({ action: 'upsert', registro: expense() });
+    const sheet = api.sheets.get('Registros')!;
+    const partial = Array(sheet.values[0].length).fill('');
+    partial[1] = '2026-09-30';
+    sheet.values.splice(2, 0, partial);
+    const result = api.post({ action: 'list' });
+    expect(result.error).toBe('SCHEMA_MISMATCH');
+    expect(result.message).toContain('fila 3');
+  });
+
+  it('keeps throwing for a fully blank row in non-Registros tables', () => {
+    const api = harness();
+    expect(api.post({ action: 'list' }).ok).toBe(true);
+    const sheet = api.sheets.get('Categorias')!;
+    sheet.values.splice(2, 0, Array(sheet.values[0].length).fill(''));
+    expect(api.post({ action: 'list' }).error).toBe('SCHEMA_MISMATCH');
+  });
+
+  it('ignores checkbox columns left at their default FALSE when detecting blank rows', () => {
+    const api = harness();
+    api.post({ action: 'upsert', registro: expense() });
+    api.post({ action: 'upsert', registro: expense({ id: 'expense-2', actualizado_en: '2026-09-30T15:00:01.000Z' }) });
+    const registros = api.sheets.get('Registros')!;
+    // Una celda con casilla (checkbox) nunca escrita vale FALSE en Sheets, no ''.
+    const blankWithCheckbox = Array(registros.values[0].length).fill('');
+    blankWithCheckbox[14] = false; // columna 'eliminado'
+    registros.values.splice(2, 0, blankWithCheckbox);
+    const listed = api.post<DataSet>({ action: 'list' });
+    expect(listed.ok).toBe(true);
+    expect(listed.data.registros.filter(r => !r.eliminado)).toHaveLength(2);
+
+    const categorias = api.sheets.get('Categorias')!;
+    const trailingWithCheckbox = Array(categorias.values[0].length).fill('');
+    trailingWithCheckbox[6] = false; // columna 'activa'
+    categorias.values.push(trailingWithCheckbox);
+    expect(api.post<DataSet>({ action: 'list' }).data.categorias).toHaveLength(15);
   });
 
   it('validates configuration and keeps settings with native JSON types', () => {

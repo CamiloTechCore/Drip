@@ -78,6 +78,12 @@ export default function Agregar({
       setError("Primero crea una deuda en Más → Deudas.");
       return;
     }
+    if (!noSpend && kind !== "deuda" && !selectedCategory) {
+      setError(
+        `Crea o activa una categoría de ${kind === "ingreso" ? "ingreso" : "gasto"} en Más → Categorías.`,
+      );
+      return;
+    }
     setBusy(true);
     try {
       const now = new Date().toISOString();
