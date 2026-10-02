@@ -580,7 +580,7 @@ interface TeamWallet {
 
 ---
 
-## 📝 Notas Importantes
+## 📝 Notas Importantes 
 
 ### Cambios validados — 2026-10-02
 
