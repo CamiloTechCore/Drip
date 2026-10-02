@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clear } from 'idb-keyval';
-import { deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, syncAccount, type Account, type Operation } from './client';
+import { clear, set } from 'idb-keyval';
+import { deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, syncAccount, type Account, type CacheState, type Operation } from './client';
 import { EMPTY_DATA } from '../lib/defaults';
 import type { Categoria, Recurrente, Registro } from '../types';
 
@@ -56,6 +56,119 @@ describe('durable offline cache', () => {
 });
 
 describe('synchronization', () => {
+  it('reconciles eleven already-saved records despite an advanced cursor and a corrected category', async () => {
+    const account = await connected();
+    for (let index = 0; index < 11; index++) await saveRegistro(account, row(`saved-${index}`));
+    const state = await readCache(account);
+    const remote = state.data.registros.map(record => ({ ...record, categoria: record.id === 'saved-0' ? 'Otros' : record.categoria, actualizado_en: '2026-09-30T10:00:00.000Z' }));
+    const stale: CacheState = { ...state, cursor: '2026-10-02T12:00:00.000Z', queue: state.queue.map(item => item.operation.action === 'upsert' && item.operation.registro.id === 'saved-0'
+      ? { ...item, operation: { action: 'upsert', registro: { ...item.operation.registro, categoria: 'No existe' } } } : item) };
+    await set(`drip:cache:v1:${account.namespace}`, stale);
+    const fetchMock = vi.fn(async (_url: string, options: RequestInit) => {
+      expect(JSON.parse(String(options.body))).toEqual({ action: 'list' });
+      return response({ ...EMPTY_DATA, registros: remote, serverTime: '2026-10-02T13:00:00.000Z' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await syncAccount(account);
+    const reconciled = await readCache(account);
+    expect(reconciled.queue).toHaveLength(0);
+    expect(reconciled.data.registros).toHaveLength(11);
+    expect(reconciled.data.registros.find(record => record.id === 'saved-0')).toEqual(remote[0]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not acknowledge a newer edit just because its ID exists on the server', async () => {
+    const account = await connected();
+    const previous = row('existing-id');
+    await saveRegistro(account, { ...previous, monto: 22000, descripcion: 'New local edit' });
+    let uploaded: Registro | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+      const payload = JSON.parse(String(options.body)) as { action: string; operations?: Operation[] };
+      if (payload.action === 'batch') {
+        expect(payload.operations).toHaveLength(1);
+        const operation = payload.operations?.[0];
+        if (operation?.action === 'upsert') uploaded = operation.registro;
+        return response({ registros: [uploaded], serverTime: new Date().toISOString() });
+      }
+      return response({ ...EMPTY_DATA, registros: [uploaded ?? previous], serverTime: new Date().toISOString() });
+    }));
+    await syncAccount(account);
+    expect(uploaded?.monto).toBe(22000);
+    expect((await readCache(account)).queue).toHaveLength(0);
+  });
+
+  it('preserves an edit made during the initial read while acknowledging the older operation', async () => {
+    const account = await connected();
+    await saveRegistro(account, row('during-list'));
+    const canonical = { ...(await readCache(account)).data.registros[0], actualizado_en: new Date(Date.now() + 5000).toISOString() };
+    let release!: (value: Response) => void;
+    let started!: () => void;
+    const began = new Promise<void>(resolve => { started = resolve; });
+    const delayed = new Promise<Response>(resolve => { release = resolve; });
+    const fetchMock = vi.fn(async () => { started(); return delayed; });
+    vi.stubGlobal('fetch', fetchMock);
+    const syncing = syncAccount(account); await began;
+    await saveRegistro(account, { ...canonical, monto: 28000 });
+    release(response({ ...EMPTY_DATA, registros: [canonical], serverTime: new Date().toISOString() }));
+    await syncing;
+    const state = await readCache(account);
+    expect(state.queue).toHaveLength(1);
+    expect(state.data.registros[0].monto).toBe(28000);
+    expect(state.data.registros[0].actualizado_en > canonical.actualizado_en).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads an unsaved legacy record with a nonexistent category using the server fallback', async () => {
+    const account = await connected(); await saveRegistro(account, row('invalid-legacy'));
+    const state = await readCache(account);
+    await set(`drip:cache:v1:${account.namespace}`, { ...state, queue: state.queue.map(item => item.operation.action === 'upsert'
+      ? { ...item, operation: { action: 'upsert', registro: { ...item.operation.registro, categoria: 'No existe' } } } : item) });
+    let uploaded: Registro[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+      const payload = JSON.parse(String(options.body)) as { action: string; operations?: Operation[] };
+      if (payload.action === 'batch') {
+        uploaded = (payload.operations ?? []).flatMap(operation => operation.action === 'upsert' ? [operation.registro] : []);
+        expect(uploaded[0].categoria).toBe('Otros');
+        return response({ registros: uploaded, serverTime: new Date().toISOString() });
+      }
+      return response({ ...EMPTY_DATA, registros: uploaded, serverTime: new Date().toISOString() });
+    }));
+    await syncAccount(account);
+    const synced = await readCache(account);
+    expect(synced.queue).toHaveLength(0);
+    expect(synced.data.registros[0].categoria).toBe('Otros');
+  });
+
+  it('acknowledges saved deletions without resending or resurrecting them', async () => {
+    const account = await connected(); await saveRegistro(account, row('deleted-remotely'));
+    await deleteRegistro(account, 'deleted-remotely');
+    const canonical = (await readCache(account)).data.registros[0];
+    const fetchMock = vi.fn(async () => response({ ...EMPTY_DATA, registros: [canonical], serverTime: new Date().toISOString() }));
+    vi.stubGlobal('fetch', fetchMock);
+    await syncAccount(account);
+    expect((await readCache(account)).queue).toHaveLength(0);
+    expect((await readCache(account)).data.registros[0].eliminado).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs a renamed category before uploading an unsaved movement', async () => {
+    const account = await connected(); await saveRegistro(account, row('old-category'));
+    const categorias = EMPTY_DATA.categorias.map(category => category.nombre === 'Comida fuera' ? { ...category, nombre: 'Restaurantes' } : category);
+    let uploaded: Registro[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+      const payload = JSON.parse(String(options.body)) as { action: string; operations?: Operation[] };
+      if (payload.action === 'batch') {
+        uploaded = (payload.operations ?? []).flatMap(operation => operation.action === 'upsert' ? [operation.registro] : []);
+        expect(uploaded[0].categoria).toBe('Restaurantes');
+        return response({ registros: uploaded, serverTime: new Date().toISOString() });
+      }
+      return response({ ...EMPTY_DATA, categorias, registros: uploaded, serverTime: new Date().toISOString() });
+    }));
+    await syncAccount(account);
+    expect((await readCache(account)).data.registros[0].categoria).toBe('Restaurantes');
+    expect((await readCache(account)).queue).toHaveLength(0);
+  });
+
   it('retries an uncertain response with the same UUID and clears only acknowledged operations', async () => {
     const account = await connected(); await saveRegistro(account, row('same-uuid'));
     const server = new Map<string, Registro>(); let attempts = 0;
@@ -74,7 +187,7 @@ describe('synchronization', () => {
     await syncAccount(account);
     expect(server.size).toBe(1);
     expect((await readCache(account)).queue).toHaveLength(0);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('preserves and rebases a newer local edit made while a batch is in flight', async () => {
@@ -93,7 +206,7 @@ describe('synchronization', () => {
         if (operation?.action === 'upsert') canonical = operation.registro;
         return response({ registros: [canonical], serverTime: canonical.actualizado_en });
       }
-      return response({ ...EMPTY_DATA, registros: [canonical], serverTime: canonical.actualizado_en });
+      return response({ ...EMPTY_DATA, registros: first ? [] : [canonical], serverTime: canonical.actualizado_en });
     }));
     const syncing = syncAccount(account); await began;
     await saveRegistro(account, { ...original, descripcion: 'Edited while sending', monto: 12000 });

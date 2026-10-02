@@ -196,8 +196,17 @@ export async function syncAccount(account: Account): Promise<void> {
   return locked(`drip:sync:${account.namespace}`, () => syncUnlocked(account));
 }
 async function syncUnlocked(account: Account): Promise<void> {
+    // Read the canonical data first. Besides hydrating a new device, this gives
+    // queued records the current category catalog before they are validated by
+    // the server.
+    const beforeSync = await readCache(account);
+    // An incremental read can omit rows whose acknowledgement was lost long ago.
+    const initial = await request<ListResponse>(account, { action: 'list', ...(!beforeSync.queue.length && beforeSync.cursor ? { since: beforeSync.cursor } : {}) });
+    await changeCache(account, current => reconcilePending(current, beforeSync, initial));
+
     // Bound this pass; edits created while the request is in flight stay queued for the next pass.
-    const snapshotIds = new Set((await readCache(account)).queue.map(item => item.queueId));
+    const snapshotIds = new Set(beforeSync.queue.map(item => item.queueId));
+    let sentBatch = false;
     while (true) {
       const eligible = (await readCache(account)).queue.filter(item => snapshotIds.has(item.queueId));
       if (!eligible.length) break;
@@ -208,6 +217,7 @@ async function syncUnlocked(account: Account): Promise<void> {
       // Compact the entire snapshot before chunking, then acknowledge every older edit of those IDs.
       const sent = eligible.filter(item => recordIds.has(opId(item.operation)));
       const result = await request<{ registros: Registro[]; serverTime: string }>(account, { action: 'batch', operations });
+      sentBatch = true;
       const sentIds = new Set(sent.map(item => item.queueId));
       await changeCache(account, current => {
         const stamps = new Map(result.registros.map(row => [row.id, row.actualizado_en]));
@@ -229,9 +239,70 @@ async function syncUnlocked(account: Account): Promise<void> {
         return { ...current, queue, data: { ...current.data, registros: mergeRegistros(current.data.registros.filter(row => !canonicalIds.has(row.id)), result.registros, queue) } };
       });
     }
+    if (!sentBatch) return;
     const beforeList = await readCache(account);
     const result = await request<ListResponse>(account, { action: 'list', ...(beforeList.cursor ? { since: beforeList.cursor } : {}) });
     await changeCache(account, current => ({ ...current, cursor: result.serverTime, data: mergeListData(current.data, result, current.queue) }));
+}
+
+/** Confirm lost acknowledgements by ID and version/content, never by ID alone. */
+function reconcilePending(current: CacheState, snapshot: CacheState, incoming: ListResponse): CacheState {
+    const categories = incoming.categorias;
+    const remote = new Map(incoming.registros.map(row => [row.id, row]));
+    const snapshotIds = new Set(snapshot.queue.map(item => item.queueId));
+    const latest = new Map<string, Operation>();
+    snapshot.queue.forEach(item => latest.set(opId(item.operation), item.operation));
+    const validCategory = (row: Registro) => categories.some(category => category.nombre === row.categoria
+      && (row.tipo !== 'ingreso' && row.tipo !== 'gasto' || category.tipo === row.tipo));
+    const fields = ['fecha', 'tipo', 'subtipo', 'monto', 'categoria', 'tags', 'descripcion', 'metodo_pago', 'necesidad', 'recurrente_id', 'deuda_id', 'eliminado', 'usuario_id'] as const;
+    const confirmed = new Set<string>();
+    latest.forEach((operation, id) => {
+      const canonical = remote.get(id);
+      if (!canonical) return;
+      const stamp = operation.action === 'upsert' ? operation.registro.actualizado_en : operation.actualizado_en;
+      const serverVersion = Date.parse(canonical.actualizado_en);
+      const localVersion = Date.parse(stamp);
+      const alreadyApplied = operation.action === 'delete' ? canonical.eliminado : fields.every(field => {
+        // A corrected server category must not resurrect the stale invalid one.
+        if (field === 'categoria' && !validCategory(operation.registro) && validCategory(canonical)) return true;
+        return (operation.registro[field] ?? '') === (canonical[field] ?? '');
+      });
+      if (serverVersion >= localVersion || alreadyApplied) confirmed.add(id);
+    });
+    const fallback = (tipo: 'ingreso' | 'gasto') => categories.find(category => category.nombre === 'Otros' && category.tipo === tipo)
+      ?? categories.find(category => category.tipo === tipo && category.activa)
+      ?? categories.find(category => category.tipo === tipo);
+    const stamps = new Map(incoming.registros.filter(row => confirmed.has(row.id)).map(row => [row.id, row.actualizado_en]));
+    const queue: QueuedOperation[] = current.queue
+      .filter(item => !snapshotIds.has(item.queueId) || !confirmed.has(opId(item.operation)))
+      .map(item => {
+      // A concurrent edit must stay newer than the canonical acknowledgement.
+      const canonicalStamp = stamps.get(opId(item.operation));
+      if (canonicalStamp) {
+        const previous = item.operation.action === 'upsert' ? item.operation.registro.actualizado_en : item.operation.actualizado_en;
+        const stamp = new Date(Math.max(Date.parse(previous), Date.parse(canonicalStamp) + 1)).toISOString();
+        stamps.set(opId(item.operation), stamp);
+        item = { ...item, operation: item.operation.action === 'upsert'
+          ? { action: 'upsert', registro: { ...item.operation.registro, actualizado_en: stamp } }
+          : { ...item.operation, actualizado_en: stamp } };
+      }
+      if (!snapshotIds.has(item.queueId) || item.operation.action !== 'upsert') return item;
+      const row = item.operation.registro;
+      const requiredType = row.tipo === 'ingreso' ? 'ingreso' : 'gasto';
+      if (validCategory(row)) return item;
+      const previous = snapshot.data.categorias.find(category => category.nombre === row.categoria);
+      const renamed = categories.find(category => category.id === previous?.id && category.tipo === requiredType);
+      const canonical = remote.get(row.id);
+      const replacement = renamed ?? (canonical && validCategory(canonical)
+        ? categories.find(category => category.nombre === canonical.categoria && category.tipo === requiredType) : undefined)
+        ?? fallback(requiredType);
+      if (!replacement) return item;
+      const registro = { ...row, categoria: replacement.nombre };
+      return { ...item, operation: { action: 'upsert', registro } };
+    });
+    // Replace optimistic timestamps for confirmed records, then replay newer edits.
+    const base = { ...current.data, registros: current.data.registros.filter(row => !confirmed.has(row.id)) };
+    return { ...current, queue, cursor: incoming.serverTime, data: mergeListData(base, incoming, queue) };
 }
 
 function members(value: unknown, fallback: string[] = []): string[] {

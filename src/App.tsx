@@ -12,7 +12,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Home,
   ArrowLeftRight,
-  Plus,
   ChartNoAxesCombined,
   Grid2X2,
   Cloud,
@@ -229,6 +228,7 @@ function DripApp() {
         </main>
         <AppFooter />
         <nav className="bottom-nav" aria-label="Navegación principal">
+          <div className="nav-group nav-group--before">
           <NavLink to="/" end>
             <Home size={21} />
             <span>Inicio</span>
@@ -237,16 +237,18 @@ function DripApp() {
             <ArrowLeftRight size={21} />
             <span>Movimientos</span>
           </NavLink>
+          </div>
           <button
             className="nav-add"
             onClick={() => add()}
             aria-label="Agregar movimiento"
           >
-            <span>
-              <Plus size={28} />
+            <span className="nav-logo">
+              <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" width="80" height="80" />
             </span>
             <small>Agregar</small>
           </button>
+          <div className="nav-group nav-group--after">
           <NavLink to="/analisis">
             <ChartNoAxesCombined size={21} />
             <span>Análisis</span>
@@ -259,6 +261,7 @@ function DripApp() {
             <Grid2X2 size={21} />
             <span>Más</span>
           </NavLink>
+          </div>
         </nav>
         <AnimatePresence>
           {capture && (

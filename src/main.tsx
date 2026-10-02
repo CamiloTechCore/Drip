@@ -10,6 +10,7 @@ import "@fontsource/inter/latin-700.css";
 import "./styles.css";
 import "./responsive.css";
 import "./glass.css";
+import "./navigation.css";
 import App from "./App";
 const queryClient = new QueryClient({
   defaultOptions: {
