@@ -10,7 +10,7 @@ export default defineConfig(() => {
       react(),
       VitePWA({
         registerType: "prompt",
-        includeAssets: ["icons/*.png"],
+        includeAssets: ["logo.png", "icons/*.png"],
         manifest: {
           name: "Drip · Finanzas contigo",
           short_name: "Drip",

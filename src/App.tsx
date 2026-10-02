@@ -22,12 +22,16 @@ import {
   X,
   Check,
   FlaskConical,
+  Star,
 } from "lucide-react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { useData } from "./hooks/useData";
 import { useAuth } from "./store/auth";
 import { AppContext } from "./context";
 import { Brand } from "./components/ui";
+import SavingsSheet from "./components/SavingsSheet";
+import { isSavingsDeposit, isSavingsWithdrawal } from "./lib/analytics";
+import type { SavingsMode } from "./lib/savings";
 const ShareSheet = lazy(() => import("./components/ShareSheet"));
 import Agregar from "./pages/Agregar";
 import Login from "./pages/Login";
@@ -77,6 +81,7 @@ function DripApp() {
   const needsAuth = !model.isDemo && !user;
   const location = useLocation();
   const [capture, setCapture] = useState<{ record?: Registro } | null>(null);
+  const [savingsCapture, setSavingsCapture] = useState<{ mode: SavingsMode; record?: Registro } | null>(null);
   const [sharing, setSharing] = useState(false);
   const [message, setMessage] = useState("");
   const [online, setOnline] = useState(navigator.onLine);
@@ -102,10 +107,21 @@ function DripApp() {
     const timer = setTimeout(() => setMessage(""), 3800);
     return () => clearTimeout(timer);
   }, [message]);
-  const add = (record?: Registro) => setCapture({ record });
+  const openSavings = (mode: SavingsMode, record?: Registro) => {
+    setCapture(null);
+    setSavingsCapture({ mode, record });
+  };
+  const add = (record?: Registro) => {
+    if (record && (isSavingsDeposit(record) || isSavingsWithdrawal(record))) {
+      openSavings(isSavingsDeposit(record) ? 'deposit' : 'withdraw', record);
+      return;
+    }
+    setSavingsCapture(null);
+    setCapture({ record });
+  };
   const share = () => setSharing(true);
   return (
-    <AppContext.Provider value={{ ...model, add, share, toast: setMessage }}>
+    <AppContext.Provider value={{ ...model, add, openSavings, share, toast: setMessage }}>
       <div className={`app-shell${needsAuth ? " app-shell--auth" : ""}`}>
         {needsAuth ? (
           <Login />
@@ -231,6 +247,10 @@ function DripApp() {
             <ChartNoAxesCombined size={21} />
             <span>Análisis</span>
           </NavLink>
+          <NavLink to="/wishes">
+            <Star size={21} />
+            <span>Deseos</span>
+          </NavLink>
           <NavLink to="/mas">
             <Grid2X2 size={21} />
             <span>Más</span>
@@ -239,6 +259,11 @@ function DripApp() {
         <AnimatePresence>
           {capture && (
             <Agregar record={capture.record} onClose={() => setCapture(null)} />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {savingsCapture && (
+            <SavingsSheet {...savingsCapture} onClose={() => setSavingsCapture(null)} />
           )}
         </AnimatePresence>
         <AnimatePresence>

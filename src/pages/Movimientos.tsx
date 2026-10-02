@@ -14,7 +14,7 @@ import { es } from "date-fns/locale";
 import { useDrip } from "../context";
 import { Card, Empty, RecordRow } from "../components/ui";
 import { money } from "../lib/format";
-import { normalizeDescription } from "../lib/analytics";
+import { normalizeDescription, isExpense, isIncome, isSavingsDeposit, isSavingsWithdrawal } from "../lib/analytics";
 export default function Movimientos() {
   const { data, add, sync, syncing, pendingIds, pending, toast } = useDrip();
   const [params] = useSearchParams();
@@ -48,7 +48,7 @@ export default function Movimientos() {
             `${r.descripcion} ${r.categoria} ${r.tags}`,
           ).includes(normalizeDescription(search))) &&
         (!category || r.categoria === category) &&
-        (!type || r.tipo === type) &&
+        (!type || (type === "gasto" ? isExpense(r) : type === "ingreso" ? isIncome(r) : type === "ahorro" ? isSavingsDeposit(r) || isSavingsWithdrawal(r) : r.tipo === type)) &&
         (!tag || r.tags.split(",").includes(tag)) &&
         (!method || r.metodo_pago === method) &&
         (!need || r.necesidad === need) &&
@@ -128,6 +128,7 @@ export default function Movimientos() {
                 <option value="">Todos</option>
                 <option value="gasto">Gastos</option>
                 <option value="ingreso">Ingresos</option>
+                <option value="ahorro">Aportes y retiros de ahorro</option>
                 <option value="deuda_pago">Abonos a deuda</option>
                 <option value="deuda_aumento">Aumentos de deuda</option>
                 <option value="sin_gasto">Sin gasto</option>

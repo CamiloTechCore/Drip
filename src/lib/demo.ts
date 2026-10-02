@@ -4,7 +4,7 @@ import { DEFAULT_CATEGORIES, DEFAULT_CONFIG } from './defaults';
 
 /** Fictional, deterministic records. The application keeps this data isolated
  * from the device's real cache and never sends these records to Google Sheets. */
-export function createDemoData(today = todayISO()): DataSet {
+export function createDemoData(today = todayISO(), userId = 'demo-user'): DataSet {
   const currentMonth = `${today.slice(0, 7)}-01`;
   const firstMonth = addMonths(currentMonth, -5);
   const records: Registro[] = [];
@@ -16,7 +16,7 @@ export function createDemoData(today = todayISO()): DataSet {
     records.push({
       id: `demo-${sequence}`, fecha, tipo: 'gasto', subtipo: 'variable', monto: 0,
       categoria: 'Otros', tags: '', descripcion: '', metodo_pago: 'debito', necesidad: 'necesario',
-      recurrente_id: '', deuda_id: '', creado_en: timestamp, actualizado_en: timestamp, eliminado: false,
+      recurrente_id: '', deuda_id: '', creado_en: timestamp, actualizado_en: timestamp, eliminado: false, usuario_id: userId,
       ...values,
     });
   };

@@ -27,22 +27,39 @@ const round = (value: number): number => Math.round((value + Number.EPSILON) * 1
 export const filterRecords = (records: Registro[], start?: string, end?: string): Registro[] =>
   records.filter(record => !record.eliminado && (!start || record.fecha >= start) && (!end || record.fecha <= end));
 
+const hasTag = (record: Registro, tag: string): boolean =>
+  record.tags.split(',').some(value => value.trim().toLowerCase() === tag);
+
+/** Savings transfers are identified explicitly, never inferred from a category
+ * name: historical purchases categorized as Ahorro keep their original meaning. */
+export const isSavingsDeposit = (record: Registro): boolean =>
+  record.tipo === 'gasto' && hasTag(record, 'ahorro_deposito');
+export const isSavingsWithdrawal = (record: Registro): boolean =>
+  record.tipo === 'ingreso' && hasTag(record, 'ahorro_retiro');
+export const isExpense = (record: Registro): boolean =>
+  record.tipo === 'deuda_pago' || (record.tipo === 'gasto' && !isSavingsDeposit(record));
+export const isIncome = (record: Registro): boolean =>
+  record.tipo === 'ingreso' && !isSavingsWithdrawal(record);
+
 export interface Totals {
   income: number; expenses: number; savings: number; debtPayments: number; available: number;
-  unnecessary: number; fixed: number; variable: number;
+  unnecessary: number; fixed: number; variable: number; savingsDeposits: number; savingsWithdrawals: number;
 }
 export function getTotals(records: Registro[], start?: string, end?: string): Totals {
   const rows = filterRecords(records, start, end);
-  const income = sum(rows.filter(row => row.tipo === 'ingreso'));
-  const expenses = sum(rows.filter(row => row.tipo === 'gasto'));
+  const income = sum(rows.filter(isIncome));
+  const expenses = sum(rows.filter(isExpense));
   const debtPayments = sum(rows.filter(row => row.tipo === 'deuda_pago'));
-  // Savings is income minus spending. Cash available also subtracts repayments,
-  // without counting principal repayments a second time as consumption.
+  const savingsDeposits = sum(rows.filter(isSavingsDeposit));
+  const savingsWithdrawals = sum(rows.filter(isSavingsWithdrawal));
+  // Repayments already belong to expenses. Transfers only move money between
+  // available cash and savings; they are neither new income nor spending.
   return {
-    income, expenses, savings: income - expenses, debtPayments, available: income - expenses - debtPayments,
-    unnecessary: sum(rows.filter(row => row.tipo === 'gasto' && row.necesidad === 'innecesario')),
-    fixed: sum(rows.filter(row => row.tipo === 'gasto' && row.subtipo === 'fijo')),
-    variable: sum(rows.filter(row => row.tipo === 'gasto' && row.subtipo === 'variable')),
+    income, expenses, savings: income - expenses, debtPayments, savingsDeposits, savingsWithdrawals,
+    available: income - expenses - savingsDeposits + savingsWithdrawals,
+    unnecessary: sum(rows.filter(row => row.tipo === 'gasto' && isExpense(row) && row.necesidad === 'innecesario')),
+    fixed: sum(rows.filter(row => row.tipo === 'deuda_pago' || (isExpense(row) && row.subtipo === 'fijo'))),
+    variable: sum(rows.filter(row => row.tipo === 'gasto' && isExpense(row) && row.subtipo === 'variable')),
   };
 }
 
@@ -52,7 +69,7 @@ export interface Cycle extends Totals {
 }
 export function inferSalaryPeriod(records: Registro[], today = todayISO()): 'quincenal' | 'mensual' | null {
   const dates = [...new Set(filterRecords(records, undefined, today)
-    .filter(row => row.tipo === 'ingreso' && row.subtipo === 'sueldo' && row.monto > 0).map(row => row.fecha))].sort();
+    .filter(row => isIncome(row) && row.subtipo === 'sueldo' && row.monto > 0).map(row => row.fecha))].sort();
   if (dates.length < 2) return null;
   const gaps = dates.slice(1).map((date, index) => daysBetween(dates[index], date)).sort((a, b) => a - b);
   const middle = Math.floor(gaps.length / 2);
@@ -64,7 +81,7 @@ export function inferSalaryPeriod(records: Registro[], today = todayISO()): 'qui
  * If a salary is late, its open cycle extends to the next estimated payday. */
 export function getCycles(records: Registro[], config: Config, today = todayISO()): Cycle[] {
   const rows = filterRecords(records, undefined, today);
-  const salaryDates = [...new Set(rows.filter(row => row.tipo === 'ingreso' && row.subtipo === 'sueldo' && row.monto > 0).map(row => row.fecha))].sort();
+  const salaryDates = [...new Set(rows.filter(row => isIncome(row) && row.subtipo === 'sueldo' && row.monto > 0).map(row => row.fecha))].sort();
   const inferred = config.tipo_ciclo === 'auto' ? inferSalaryPeriod(rows, today) : null;
   let boundaries: string[];
   if (inferred && salaryDates.length >= 2) {
@@ -128,7 +145,7 @@ function groupedExpenses(records: Registro[], keyOf: (record: Registro) => strin
   return [...groups.values()].sort((a, b) => b.total - a.total);
 }
 export function getRepeatedExpenses(records: Registro[]): ExpenseGroup[] {
-  return groupedExpenses(filterRecords(records).filter(row => row.tipo === 'gasto'),
+  return groupedExpenses(filterRecords(records).filter(isExpense),
     row => normalizeDescription(row.descripcion || row.categoria), row => row.descripcion || row.categoria)
     .filter(group => group.count >= 2).sort((a, b) => b.count - a.count || b.total - a.total);
 }
@@ -137,7 +154,7 @@ export function getAntExpenses(records: Registro[], config: Config, today = toda
   total: number; annualProjection: number; count: number; items: ExpenseGroup[]; records: Registro[];
 } {
   const rows = filterRecords(records, addDays(today, -29), today)
-    .filter(row => row.tipo === 'gasto' && row.subtipo === 'variable' && row.monto > 0 && row.monto <= config.umbral_hormiga);
+    .filter(row => row.tipo === 'gasto' && isExpense(row) && row.subtipo === 'variable' && row.monto > 0 && row.monto <= config.umbral_hormiga);
   const descriptions = new Map<string, number>();
   const categories = new Map<string, number>();
   rows.forEach(row => {
@@ -157,12 +174,12 @@ export function getAntExpenses(records: Registro[], config: Config, today = toda
 
 export interface NamedTotal { name: string; total: number; count: number }
 export function getCategoryTotals(records: Registro[]): NamedTotal[] {
-  return groupedExpenses(filterRecords(records).filter(row => row.tipo === 'gasto'), row => row.categoria, row => row.categoria)
+  return groupedExpenses(filterRecords(records).filter(isExpense), row => row.categoria, row => row.categoria)
     .map(group => ({ name: group.label, total: group.total, count: group.count }));
 }
 export function getTagTotals(records: Registro[]): NamedTotal[] {
   const groups = new Map<string, NamedTotal>();
-  filterRecords(records).filter(row => row.tipo === 'gasto').forEach(row => {
+  filterRecords(records).filter(isExpense).forEach(row => {
     new Set(row.tags.split(',').map(tag => tag.trim().toLowerCase().replace(/^#+/, '')).filter(Boolean)).forEach(name => {
       const group = groups.get(name) ?? { name, total: 0, count: 0 };
       group.total += row.monto;
@@ -185,8 +202,8 @@ export function getMonthlySummary(records: Registro[]): MonthlySummary[] {
     summaries.push({
       ...getTotals(selected), month: month.slice(0, 7),
       label: new Intl.DateTimeFormat('es-CO', { month: 'short', timeZone: 'UTC' }).format(parse(month)),
-      salary: sum(selected.filter(row => row.tipo === 'ingreso' && row.subtipo === 'sueldo')),
-      additional: sum(selected.filter(row => row.tipo === 'ingreso' && row.subtipo === 'adicional')),
+      salary: sum(selected.filter(row => isIncome(row) && row.subtipo === 'sueldo')),
+      additional: sum(selected.filter(row => isIncome(row) && row.subtipo === 'adicional')),
     });
   }
   return summaries;
@@ -285,8 +302,51 @@ export function getDebtSummary(debts: Deuda[], records: Registro[], today = toda
     growthPercent: growthPercent(current.balance, previous), payoffDate, items, history };
 }
 
+export interface SavingsStreak {
+  balance: number; totalDeposits: number; totalWithdrawals: number;
+  current: number; best: number; startedAt: string | null; lastWithdrawal: string | null; badges: number[];
+}
+
+/** Days preserving a positive savings balance without withdrawing. The deposit
+ * date is day zero; another deposit preserves the start, while every positive
+ * withdrawal resets it. An overdrawn balance remains visible instead of being
+ * silently clamped. Same-day events use capture time then ID for stable replay. */
+export function getSavingsStreak(records: Registro[], today = todayISO()): SavingsStreak {
+  const transfers = filterRecords(records, undefined, today)
+    .filter(row => row.monto > 0 && (isSavingsDeposit(row) || isSavingsWithdrawal(row)))
+    .sort((a, b) => a.fecha.localeCompare(b.fecha)
+      || Date.parse(a.creado_en) - Date.parse(b.creado_en)
+      || a.id.localeCompare(b.id));
+  let balance = 0;
+  let totalDeposits = 0;
+  let totalWithdrawals = 0;
+  let startedAt: string | null = null;
+  let lastWithdrawal: string | null = null;
+  let best = 0;
+  for (const row of transfers) {
+    if (balance > 0 && startedAt) best = Math.max(best, daysBetween(startedAt, row.fecha));
+    if (isSavingsWithdrawal(row)) {
+      totalWithdrawals += row.monto;
+      balance = round(balance - row.monto);
+      lastWithdrawal = row.fecha;
+      startedAt = balance > 0 ? row.fecha : null;
+    } else {
+      const previousBalance = balance;
+      totalDeposits += row.monto;
+      balance = round(balance + row.monto);
+      if (previousBalance <= 0 && balance > 0) startedAt = row.fecha;
+    }
+  }
+  const current = balance > 0 && startedAt ? Math.max(0, daysBetween(startedAt, today)) : 0;
+  best = Math.max(best, current);
+  return {
+    balance, totalDeposits: round(totalDeposits), totalWithdrawals: round(totalWithdrawals),
+    current, best, startedAt, lastWithdrawal, badges: [3, 7, 14, 30, 60, 100].filter(days => best >= days),
+  };
+}
+
 const breaksStreak = (record: Registro, config: Config): boolean => record.monto > 0 &&
-  ((record.tipo === 'gasto' && (record.subtipo === 'variable' || !config.excluir_fijos_de_racha)) ||
+  ((record.tipo === 'gasto' && !isSavingsDeposit(record) && (record.subtipo === 'variable' || !config.excluir_fijos_de_racha)) ||
     (record.tipo === 'deuda_pago' && !config.excluir_fijos_de_racha));
 const mondayOf = (date: string): string => addDays(date, -((parse(date).getUTCDay() + 6) % 7));
 export interface Streaks {
@@ -352,7 +412,7 @@ export function getSpendingPatterns(records: Registro[]): {
 } {
   const weekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((label, index) => ({ day: index + 1, label, total: 0 }));
   const monthDays = Array.from({ length: 31 }, (_, index) => ({ day: index + 1, total: 0 }));
-  filterRecords(records).filter(row => row.tipo === 'gasto').forEach(row => {
+  filterRecords(records).filter(isExpense).forEach(row => {
     const date = parse(row.fecha);
     weekdays[(date.getUTCDay() + 6) % 7].total += row.monto;
     monthDays[date.getUTCDate() - 1].total += row.monto;

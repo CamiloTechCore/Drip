@@ -4,6 +4,61 @@
 
 Drip es una PWA en español, de tema claro, adaptable a teléfonos, tablets y escritorio. Registra movimientos en Google Sheets mediante un único archivo de Google Apps Script, permite capturar gastos sin conexión y convierte el historial en ciclos, alertas y hábitos de ahorro.
 
+## 🌟 Visión y Propósito
+
+Drip nace con la misión de transformar la relación de las parejas con el dinero. Creemos firmemente que **compartir buenos hábitos financieros es fundamental**, incluso cuando no se vive bajo el mismo techo. La transparencia en los gastos, la comunicación abierta sobre metas financieras y el trabajo conjunto hacia objetivos comunes son pilares que fortalecen cualquier relación.
+
+### ¿Por qué es importante compartir hábitos financieros en pareja?
+
+- **Construcción de confianza**: La transparencia financiera crea un ambiente de confianza mutua y honestidad
+- **Alineación de metas**: Permite establecer objetivos financieros compartidos y trabajar en equipo para alcanzarlos
+- **Reducción de conflictos**: Evita malentendidos y tensiones relacionadas con el dinero
+- **Educación mutua**: Cada pareja puede aprender de los hábitos positivos del otro
+- **Preparación para el futuro**: Facilita la planificación de proyectos importantes como vivienda, viajes o inversión
+- **Responsabilidad compartida**: Promueve un sentido de responsabilidad conjunta sobre las decisiones financieras
+
+### Proyectos de ahorro futuros
+
+Drip está diseñado para evolucionar junto con tus necesidades financieras. Entre nuestros planes futuros incluyen:
+
+- **Wishes (Deseos)**: Sistema de equipos compartidos para planificar y ahorrar juntos para metas específicas
+- **Metas colaborativas**: Herramientas para establecer y seguimiento de objetivos financieros en pareja
+- **Alertas inteligentes**: Notificaciones personalizadas basadas en patrones de gasto
+- **Comparativas anónimas**: Benchmarking de hábitos financieros con parejas similares
+- **Integración con bancos**: Conexión segura para importar transacciones automáticamente
+- **Educación financiera**: Contenido personalizado sobre gestión de dinero en pareja
+
+## 🚀 Tecnologías del Proyecto
+
+### Frontend
+- **React 18** - Framework UI moderno y eficiente
+- **TypeScript** - Tipado estático para mayor seguridad en el código
+- **Vite** - Build tool ultra rápido
+- **Tailwind CSS** - Framework CSS utilitario para diseño responsive
+- **Framer Motion** - Animaciones fluidas y profesionales
+- **TanStack Query** - Gestión de estado y caché de datos
+- **Recharts** - Gráficos interactivos para análisis financiero
+- **date-fns** - Manipulación de fechas ligera y moderna
+- **jsPDF** - Generación de reportes PDF
+- **Lucide React** - Iconos modernos y consistentes
+- **React Router** - Navegación client-side con HashRouter
+
+### Backend
+- **Google Apps Script** - Plataforma serverless integrada con Google Sheets
+- **Google Sheets** - Base de datos en la nube colaborativa
+- **Content Service** - API RESTful sin infraestructura adicional
+
+### Infraestructura
+- **Vercel** - Hosting y despliegue continuo
+- **GitHub Actions** - CI/CD automatizado
+- **PWA** - Aplicación web progresiva con soporte offline
+
+## 🌐 URL del Proyecto
+
+**https://drip-inky.vercel.app/**
+
+Disponible 24/7, optimizado para funcionar en cualquier dispositivo moderno con conexión a internet.
+
 Se usa un **libro compartido privado**: quienes conocen la URL acceden al mismo conjunto de datos. Desde `Drip_API:V:0.0.0.03` cada persona inicia sesión con su propio correo y contraseña; ya no existe un token de dispositivo, y la cuenta identifica quien creó cada movimiento mediante `usuario_id`. Puedes usar tags como `personal`, `en pareja` o `hogar`; no representan identidades verificadas, pero ahora se complementan con la cuenta de quien registra. No hay integración bancaria ni publicación en App Store; la aplicación se mantiene exclusivamente como sitio web.
 
 ## 1. Backend: un único `Code.gs`
@@ -276,7 +331,7 @@ La URL de Apps Script debe configurarse por separado en cada proveedor utilizado
 
 ## 6. Seguridad y solución de problemas
 
-**Desde `Drip_API:V:0.0.0.03` ya no existe un token de dispositivo.** El Web App de Apps Script sigue publicado con acceso “Cualquier usuario”, por lo que cualquier persona que conozca la URL `/exec` puede llamar a `list`, `upsert`, `batch` y demás acciones sin autenticarse; `register`/`login` identifican a quien escribe cada movimiento (`usuario_id`), pero no restringen quién puede leer o escribir en el libro. Esta es una decisión deliberada mientras el proyecto se mantiene como sitio web de uso personal/en pareja; no publiques la URL de tu implementación si quieres mantener los datos privados, y evalúa restaurar un control de acceso a nivel de red (por ejemplo, Workspace) antes de compartirla ampliamente.
+**Desde `Drip_API:V:0.0.0.05` ya no existe un token de dispositivo.** El Web App de Apps Script sigue publicado con acceso “Cualquier usuario”, por lo que cualquier persona que conozca la URL `/exec` puede llamar a `list`, `upsert`, `batch` y demás acciones sin autenticarse; `register`/`login` identifican a quien escribe cada movimiento (`usuario_id`), pero no restringen quién puede leer o escribir en el libro. Esta es una decisión deliberada mientras el proyecto se mantiene como sitio web de uso personal/en pareja; no publiques la URL de tu implementación si quieres mantener los datos privados, y evalúa restaurar un control de acceso a nivel de red (por ejemplo, Workspace) antes de compartirla ampliamente.
 
 Cada persona tiene su propia contraseña: el backend la guarda como `password_hash` (SHA-256 con una `salt` aleatoria por cuenta), nunca en texto plano, y la API jamás devuelve el hash ni la sal. No hay registro de información financiera en consola, trackers ni analítica de terceros.
 

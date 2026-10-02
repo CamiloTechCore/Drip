@@ -1,0 +1,64 @@
+/* Opaque first: legible fallback when the browser cannot blur the background.
+   No filters on ancestors of fixed navigation or modal overlays. */
+.card, .auth-panel .card, .streak-card, .entity-card, .menu-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
+  border: 1px solid #ffffff;
+  box-shadow: 0 12px 32px #2531580b, 0 3px 7px #25315808,
+    inset 0 1px 0 #ffffff, inset 0 -1px 0 #dce1ef80;
+}
+.balance-card {
+  background: radial-gradient(ellipse at 5% 0%, #807aff 0%, transparent 60%),
+    linear-gradient(125deg, #6258e5, #4438bf);
+  border: 1px solid #b6b0ff;
+  box-shadow: 0 16px 34px #5145ce28, 0 4px 8px #5145ce14,
+    inset 0 1px 0 #ffffff60, inset 0 -2px 0 #21176b28;
+}
+.streak-card, .card.savings-card {
+  background: linear-gradient(130deg, #f4fff9, #e9f7f2);
+  border-color: #ffffff;
+}
+.sheet {
+  background: linear-gradient(125deg, #fff, #f5f7fc);
+  border: 1px solid #fff;
+  box-shadow: 0 24px 80px #1b234233, inset 0 1px 0 #fff;
+}
+@supports ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
+  .card, .auth-panel .card, .streak-card, .entity-card, .menu-card {
+    background: linear-gradient(135deg, #ffffffed, #f7f9fff0);
+    -webkit-backdrop-filter: blur(16px) saturate(120%);
+    backdrop-filter: blur(16px) saturate(120%);
+  }
+  .streak-card, .card.savings-card {
+    background: linear-gradient(130deg, #f4fff9f5, #e9f7f2ed);
+  }
+}
+/* Six tabs remain readable and tappable at 320px after adding Deseos. */
+@media (max-width: 599px) {
+  .app-shell:not(.app-shell--auth) .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0;
+    padding-inline: max(4px, env(safe-area-inset-left)) max(4px, env(safe-area-inset-right));
+  }
+  .app-shell:not(.app-shell--auth) .bottom-nav > a,
+  .app-shell:not(.app-shell--auth) .nav-add { min-width: 0; padding-inline: 0; }
+  .app-shell:not(.app-shell--auth) .bottom-nav > a > span,
+  .app-shell:not(.app-shell--auth) .nav-add small { font-size: clamp(.55rem, 2.4vw, .7rem); }
+}
+.team-card, .wish-card, .wallet-card { min-width: 0; }
+.team-card > div, .wish-info, .comment-form input { min-width: 0; }
+.team-card h3, .wish-info h3, .wish-info p, .comment p { overflow-wrap: anywhere; }
+.wish-status { flex-wrap: wrap; }
+.wallet-actions, .wish-votes { flex-wrap: wrap; }
+.vote-button { min-height: 44px; color: #5f637b; }
+.status-badge.approved { color: #296242; }
+.team-card p, .wallet-label, .progress-text, .form-hint { color: #62697b; }
+.full-width { width: 100%; }
+.form, .form-group { display: grid; gap: 8px; }
+.form { gap: 20px; }
+.form-group input, .form-group textarea { width: 100%; min-width: 0; }
+.page-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.page-header h1 { flex: 1; min-width: 0; }
+@media (min-width: 768px) { .teams-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 359px) { .wish-header { flex-wrap: wrap; } }
+@media (forced-colors: active) { .card, .balance-card, .streak-card { border: 1px solid CanvasText; } }

@@ -6,6 +6,7 @@ import {
   addDays, addMonths, getAntExpenses, getCategoryTotals, getCycles, getDebtSummary, getHeatmap,
   getMonthlySummary, getRepeatedExpenses, getSpendingPatterns, getStreaks, getTagTotals,
   getTotals, getUnnecessaryGrowth, growthPercent, inferSalaryPeriod, normalizeDescription, todayISO,
+  getSavingsStreak, isSavingsDeposit, isSavingsWithdrawal, isExpense, isIncome,
 } from '../src/lib/analytics';
 
 const cfg = (overrides: Partial<Config> = {}): Config => ({ ...DEFAULT_CONFIG, ...overrides });
@@ -17,6 +18,10 @@ const record = (fecha: string, values: Partial<Registro> = {}): Registro => ({
   actualizado_en: `${fecha}T12:00:00Z`, eliminado: false, ...values,
 });
 const salary = (date: string, amount = 1000000): Registro => record(date, { tipo: 'ingreso', subtipo: 'sueldo', monto: amount, categoria: 'Sueldo', necesidad: '' });
+const deposit = (date: string, amount: number, values: Partial<Registro> = {}): Registro =>
+  record(date, { categoria: 'Ahorro', descripcion: 'Depósito a ahorro', tags: 'ahorro_deposito', monto: amount, ...values });
+const withdrawal = (date: string, amount: number, values: Partial<Registro> = {}): Registro =>
+  record(date, { tipo: 'ingreso', subtipo: 'adicional', categoria: 'Ingreso extra', descripcion: 'Retiro de ahorro', tags: 'ahorro_retiro', necesidad: '', monto: amount, ...values });
 const debt: Deuda = { id: 'loan', nombre: 'Préstamo', acreedor: 'Ejemplo', monto_inicial: 1000,
   tasa_interes_mensual: 10, fecha_inicio: '2026-01-01', cuota_minima: 200, dia_pago: 1, activa: true };
 
@@ -44,7 +49,7 @@ describe('cash totals and salary cycles', () => {
     const rows = [salary('2026-09-01', 1000), record('2026-09-02', { monto: 100 }),
       record('2026-09-03', { tipo: 'deuda_pago', monto: 200 }), record('2026-09-03', { tipo: 'deuda_aumento', monto: 300 }),
       record('2026-09-04', { eliminado: true, monto: 999 }), record('2026-08-31', { monto: 999 })];
-    expect(getTotals(rows, '2026-09-01', '2026-09-30')).toMatchObject({ income: 1000, expenses: 100, savings: 900, debtPayments: 200, available: 700 });
+    expect(getTotals(rows, '2026-09-01', '2026-09-30')).toMatchObject({ income: 1000, expenses: 300, savings: 700, debtPayments: 200, available: 700 });
   });
   it('uses distinct salary days and the median to infer biweekly periods', () => {
     const rows = [salary('2026-07-01'), salary('2026-07-01'), salary('2026-07-16'), salary('2026-08-01'), salary('2026-08-16')];
@@ -58,7 +63,7 @@ describe('cash totals and salary cycles', () => {
       record('2026-09-04', { tipo: 'deuda_pago', monto: 50000 }), salary('2026-10-01')];
     const cycles = getCycles(rows, cfg(), '2026-09-10');
     expect(cycles).toHaveLength(2);
-    expect(cycles[1]).toMatchObject({ start: '2026-09-01', end: '2026-09-30', days: 30, elapsedDays: 10, dailyAverage: 10000, projection: 300000, spentPercent: 10 });
+    expect(cycles[1]).toMatchObject({ start: '2026-09-01', end: '2026-09-30', days: 30, elapsedDays: 10, dailyAverage: 15000, projection: 450000, spentPercent: 15 });
     expect(cycles[1].availablePerDay).toBeCloseTo(850000 / 21);
   });
   it('falls back to a clamped cut day and honors forced manual cycles', () => {
@@ -166,6 +171,103 @@ describe('no-spend streaks and weekly reductions', () => {
     expect(heatmap[10]).toMatchObject({ status: 'clear', confirmed: true });
     expect(heatmap[11]).toMatchObject({ status: 'clear', confirmed: false });
     expect(heatmap[12].status).toBe('future');
+  });
+});
+
+describe('debt repayments and explicit savings transfers', () => {
+  it('classifies exact transfer tags with their direction, never category names or substrings', () => {
+    expect(isSavingsDeposit(deposit('2026-09-01', 100, { tags: ' personal, AHORRO_DEPOSITO ' }))).toBe(true);
+    expect(isSavingsWithdrawal(withdrawal('2026-09-02', 50))).toBe(true);
+    expect(isSavingsDeposit(record('2026-09-01', { categoria: 'Ahorro', tags: 'sin_ahorro_deposito' }))).toBe(false);
+    expect(isSavingsDeposit(salary('2026-09-01'))).toBe(false);
+    expect(isSavingsDeposit(withdrawal('2026-09-01', 100, { tags: 'ahorro_deposito' }))).toBe(false);
+    expect(isSavingsWithdrawal(deposit('2026-09-01', 100, { tags: 'ahorro_retiro' }))).toBe(false);
+    expect(isExpense(record('2026-09-01', { tipo: 'deuda_pago' }))).toBe(true);
+    expect(isExpense(deposit('2026-09-01', 100))).toBe(false);
+    expect(isIncome(withdrawal('2026-09-01', 100))).toBe(false);
+    expect(isIncome(salary('2026-09-01'))).toBe(true);
+  });
+  it('counts repayments exactly once across totals, cycles, months and expense breakdowns', () => {
+    const rows = [salary('2026-09-01', 1000), record('2026-09-02', { monto: 100 }),
+      record('2026-09-03', { tipo: 'deuda_pago', subtipo: '', monto: 200, categoria: 'Deudas', deuda_id: 'loan', tags: 'credito', descripcion: 'Abono tarjeta', necesidad: '' }),
+      record('2026-09-04', { tipo: 'deuda_pago', subtipo: '', monto: 50, categoria: 'Deudas', deuda_id: 'loan', tags: 'credito', descripcion: 'Abono tarjeta', necesidad: '' }),
+      deposit('2026-09-05', 300), withdrawal('2026-09-06', 80),
+      record('2026-09-07', { tipo: 'ingreso', subtipo: 'adicional', monto: 20, categoria: 'Ingreso extra' }),
+      record('2026-09-08', { tipo: 'deuda_aumento', monto: 999 }), deposit('2026-09-09', 999, { eliminado: true })];
+    const snapshot = structuredClone(rows);
+    const totals = { income: 1020, expenses: 350, savings: 670, debtPayments: 250, available: 450,
+      savingsDeposits: 300, savingsWithdrawals: 80, fixed: 250, variable: 100, unnecessary: 100 };
+    expect(getTotals(rows)).toEqual(totals);
+    expect(getCycles(rows, cfg({ tipo_ciclo: 'mensual' }), '2026-09-30').at(-1)).toMatchObject(totals);
+    expect(getMonthlySummary(rows)[0]).toMatchObject({ ...totals, salary: 1000, additional: 20 });
+    expect(getCategoryTotals(rows)).toEqual([{ name: 'Deudas', total: 250, count: 2 }, { name: 'Comida fuera', total: 100, count: 1 }]);
+    expect(getTagTotals(rows)).toEqual([{ name: 'credito', total: 250, count: 2 }]);
+    expect(getRepeatedExpenses(rows)).toEqual([expect.objectContaining({ label: 'Abono tarjeta', count: 2, total: 250 })]);
+    expect(getSpendingPatterns(rows).monthDays.reduce((total, day) => total + day.total, 0)).toBe(350);
+    expect(getSpendingPatterns(rows).monthDays[4].total).toBe(0);
+    expect(rows).toEqual(snapshot);
+  });
+  it('does not treat transfers as spending, unnecessary purchases, ant expenses or salary boundaries', () => {
+    const rows = [salary('2026-08-31', 1000), deposit('2026-09-01', 10), deposit('2026-09-08', 20),
+      deposit('2026-09-15', 30), withdrawal('2026-09-16', 5, { subtipo: 'sueldo' })];
+    expect(getTotals(rows)).toMatchObject({ income: 1000, expenses: 0, unnecessary: 0, variable: 0, fixed: 0 });
+    expect(getUnnecessaryGrowth(rows, '2026-09-01', '2026-09-23').current).toBe(0);
+    expect(getAntExpenses(rows, cfg(), '2026-09-23').total).toBe(0);
+    expect(getRepeatedExpenses(rows)).toEqual([]);
+    expect(getCategoryTotals(rows)).toEqual([]);
+    expect(getTagTotals(rows)).toEqual([]);
+    expect(inferSalaryPeriod(rows, '2026-09-23')).toBeNull();
+    expect(getStreaks(rows, cfg({ excluir_fijos_de_racha: false }), '2026-09-23')).toMatchObject({ current: 24, weekly: 0 });
+    expect(getHeatmap(rows, cfg({ excluir_fijos_de_racha: false }), '2026-09', '2026-09-23')[14]).toMatchObject({ amount: 0, status: 'clear' });
+  });
+});
+
+describe('days preserving savings', () => {
+  it('starts with zero complete days and does not restart for further deposits', () => {
+    const rows = [deposit('2026-09-01', 100), deposit('2026-09-05', 50)];
+    expect(getSavingsStreak(rows, '2026-09-01')).toMatchObject({ balance: 100, current: 0, best: 0, startedAt: '2026-09-01' });
+    expect(getSavingsStreak(rows, '2026-09-02').current).toBe(1);
+    expect(getSavingsStreak(rows, '2026-09-08')).toEqual({ balance: 150, totalDeposits: 150, totalWithdrawals: 0,
+      current: 7, best: 7, startedAt: '2026-09-01', lastWithdrawal: null, badges: [3, 7] });
+  });
+  it('resets on a partial withdrawal and preserves the longest completed interval', () => {
+    const rows = [deposit('2026-09-01', 100), withdrawal('2026-09-10', 20), deposit('2026-09-12', 50)];
+    expect(getSavingsStreak(rows, '2026-09-10')).toMatchObject({ balance: 80, current: 0, best: 9, startedAt: '2026-09-10', lastWithdrawal: '2026-09-10' });
+    expect(getSavingsStreak(rows, '2026-09-14')).toMatchObject({ balance: 130, current: 4, best: 9, startedAt: '2026-09-10', badges: [3, 7] });
+  });
+  it('stops at a zero balance and starts a new interval after replenishing it', () => {
+    const rows = [deposit('2026-09-01', 100), withdrawal('2026-09-10', 100), deposit('2026-09-15', 40)];
+    expect(getSavingsStreak(rows, '2026-09-14')).toMatchObject({ balance: 0, current: 0, best: 9, startedAt: null });
+    expect(getSavingsStreak(rows, '2026-09-18')).toMatchObject({ balance: 40, current: 3, best: 9, startedAt: '2026-09-15' });
+  });
+  it('keeps an overdrawn balance visible and waits until deposits restore a positive balance', () => {
+    const rows = [deposit('2026-09-01', 100), withdrawal('2026-09-04', 150), deposit('2026-09-05', 30), deposit('2026-09-08', 25)];
+    expect(getSavingsStreak(rows, '2026-09-06')).toMatchObject({ balance: -20, totalDeposits: 130, totalWithdrawals: 150, current: 0, best: 3, startedAt: null });
+    expect(getSavingsStreak(rows, '2026-09-10')).toMatchObject({ balance: 5, current: 2, best: 3, startedAt: '2026-09-08' });
+  });
+  it('replays same-day transfers by capture time independently of input order', () => {
+    const first = deposit('2026-09-01', 100);
+    const morning = withdrawal('2026-09-08', 100, { creado_en: '2026-09-08T13:00:00.000Z' });
+    const afternoon = deposit('2026-09-08', 30, { creado_en: '2026-09-08T17:00:00.000Z' });
+    const rows = [afternoon, first, morning];
+    const sameDay = getSavingsStreak(rows, '2026-09-08');
+    expect(sameDay).toMatchObject({ balance: 30, current: 0, best: 7, startedAt: '2026-09-08', lastWithdrawal: '2026-09-08' });
+    expect(getSavingsStreak([...rows].reverse(), '2026-09-08')).toEqual(sameDay);
+    expect(getSavingsStreak(rows, '2026-09-09').current).toBe(1);
+  });
+  it('ignores deleted, future, untagged and zero transfers without mutating records', () => {
+    const rows = [record('2026-08-01', { categoria: 'Ahorro', monto: 999 }), deposit('2026-09-01', 100),
+      withdrawal('2026-09-03', 50, { eliminado: true }), withdrawal('2026-09-05', 0),
+      withdrawal('2026-10-01', 100), deposit('2026-08-01', 999, { eliminado: true })];
+    const snapshot = structuredClone(rows);
+    expect(getSavingsStreak(rows, '2026-09-08')).toEqual({ balance: 100, totalDeposits: 100, totalWithdrawals: 0,
+      current: 7, best: 7, startedAt: '2026-09-01', lastWithdrawal: null, badges: [3, 7] });
+    expect(rows).toEqual(snapshot);
+    expect(getSavingsStreak([], '2026-09-08')).toMatchObject({ balance: 0, current: 0, best: 0, startedAt: null, lastWithdrawal: null, badges: [] });
+  });
+  it('does not earn a streak from floating-point residue after a complete withdrawal', () => {
+    const rows = [deposit('2026-09-01', 0.1), deposit('2026-09-01', 0.2), withdrawal('2026-09-02', 0.3)];
+    expect(getSavingsStreak(rows, '2026-09-10')).toMatchObject({ balance: 0, current: 0, best: 1, totalDeposits: 0.3, totalWithdrawals: 0.3, startedAt: null });
   });
 });
 

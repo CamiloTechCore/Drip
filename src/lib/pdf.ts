@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { getAntExpenses, getCategoryTotals, getDebtSummary, getStreaks, getTotals, getUnnecessaryGrowth } from './analytics';
+import { isSavingsDeposit, isSavingsWithdrawal, getSavingsStreak, getAntExpenses, getCategoryTotals, getDebtSummary, getStreaks, getTotals, getUnnecessaryGrowth } from './analytics';
 import { formatDate, money } from './format';
 import type { DataSet } from '../types';
 
@@ -66,7 +66,7 @@ export function generateSummaryPdf(data: DataSet, range: SummaryRange): File {
     doc.setFontSize(15); doc.setTextColor(...INK); doc.setFont('helvetica', 'bold'); doc.text(amount(value), x + 5, top + 17);
   });
   y += 66;
-  paragraph(`Pagos a deudas: ${amount(totals.debtPayments)}. Disponible después de gastos y pagos: ${amount(totals.available)}. La deuda incluye intereses estimados, no una liquidación del acreedor.`);
+  paragraph(`Pagos a deudas incluidos en gastos: ${amount(totals.debtPayments)}. Disponible después de gastos y transferencias de ahorro: ${amount(totals.available)}. La deuda incluye intereses estimados, no una liquidación del acreedor.`);
 
   heading('En qué se fue el dinero');
   if (categories.length) {
@@ -91,10 +91,13 @@ export function generateSummaryPdf(data: DataSet, range: SummaryRange): File {
   paragraph(`Racha al cierre: ${streak.current} días sin gastar. Mejor racha: ${streak.best} días. Semanas consecutivas reduciendo gastos: ${streak.weekly}. Reducción acumulada: ${streak.weeklyReductionPercent.toFixed(1)}%.`);
   paragraph(`Saldo de deuda estimado: ${amount(debt.balance)}. Intereses estimados acumulados: ${amount(debt.interest)}. ${debt.payoffDate ? `Fecha estimada de liberación: ${formatDate(debt.payoffDate, 'd MMM yyyy')}.` : 'Sin fecha de liberación estimable con las cuotas actuales.'}`);
 
+  const savings = getSavingsStreak(data.registros, range.end);
+  paragraph(`Ahorro reservado al cierre: ${amount(savings.balance)}. Racha sin retiros: ${savings.current} días; mejor: ${savings.best} días. Aportes en el periodo: ${amount(totals.savingsDeposits)}. Retiros: ${amount(totals.savingsWithdrawals)}.`);
+
   heading('Detalle de movimientos');
   if (records.length) {
     const names: Record<string, string> = { ingreso: 'Ingreso', gasto: 'Gasto', deuda_aumento: 'Más deuda', deuda_pago: 'Pago deuda', sin_gasto: 'Sin gasto' };
-    table(['Fecha', 'Tipo', 'Descripción / categoría', 'Monto', 'Método'], [...records].sort((a, b) => a.fecha.localeCompare(b.fecha)).map(row => [formatDate(row.fecha, 'dd/MM/yy'), names[row.tipo], printable(`${row.descripcion || row.categoria || 'Día confirmado'}${row.descripcion && row.categoria ? ` - ${row.categoria}` : ''}${row.tags ? `\n${row.tags}` : ''}`), amount(row.monto), row.metodo_pago]), { 0: { cellWidth: 19 }, 1: { cellWidth: 22 }, 2: { cellWidth: 78 }, 3: { cellWidth: 34 }, 4: { cellWidth: 25 } });
+    table(['Fecha', 'Tipo', 'Descripción / categoría', 'Monto', 'Método'], [...records].sort((a, b) => a.fecha.localeCompare(b.fecha)).map(row => [formatDate(row.fecha, 'dd/MM/yy'), isSavingsDeposit(row) ? 'Aporte ahorro' : isSavingsWithdrawal(row) ? 'Retiro ahorro' : names[row.tipo], printable(`${row.descripcion || row.categoria || 'Día confirmado'}${row.descripcion && row.categoria ? ` - ${row.categoria}` : ''}${row.tags ? `\n${row.tags}` : ''}`), amount(row.monto), row.metodo_pago]), { 0: { cellWidth: 19 }, 1: { cellWidth: 22 }, 2: { cellWidth: 78 }, 3: { cellWidth: 34 }, 4: { cellWidth: 25 } });
   } else paragraph('No hay movimientos en el rango seleccionado.');
 
   const pages = doc.getNumberOfPages();

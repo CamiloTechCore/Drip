@@ -537,6 +537,7 @@
     grid-template-areas:
       "intro intro"
       "balance streak"
+      "savings savings"
       "signals signals"
       "insights insights"
       "chart-title records-title"
@@ -582,7 +583,7 @@
   }
   .app-shell:not(.app-shell--auth)
     .home-page:has(> .records-card)
-    > .card:not(.records-card):not(.welcome-card) {
+    > .card:not(.records-card):not(.welcome-card):not(.savings-card) {
     grid-area: chart;
     align-self: stretch;
   }
@@ -824,4 +825,8 @@
   .app-shell:not(.app-shell--auth) .bottom-nav {
     padding-top: 96px;
   }
+}
+
+@media (min-width: 900px) {
+  .app-shell:not(.app-shell--auth) .home-page:has(> .records-card) > .savings-card { grid-area: savings; }
 }

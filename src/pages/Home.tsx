@@ -26,6 +26,7 @@ import {
 import { money } from "../lib/format";
 import { Amount, Card, Empty, RecordRow, SectionTitle } from "../components/ui";
 import { CashChart } from "../components/Charts";
+import SavingsCard from "../components/SavingsCard";
 export default function Home() {
   const { data, add, share, isDemo, setDemo, pendingIds } = useDrip();
   const { registros, config, categorias } = data;
@@ -46,14 +47,8 @@ export default function Home() {
   const currency = config.moneda;
   const income = current?.income ?? 0,
     expenses = current?.expenses ?? 0;
-  const payments = records
-    .filter(
-      (r) =>
-        r.tipo === "deuda_pago" &&
-        (!current || (r.fecha >= current.start && r.fecha <= current.end)),
-    )
-    .reduce((s, r) => s + r.monto, 0);
-  const available = income - expenses - payments;
+  // Payments are already included in cycle expenses; never subtract them twice.
+  const available = current?.available ?? 0;
   return (
     <div className="page home-page">
       <div className="page-intro">
@@ -164,6 +159,7 @@ export default function Home() {
         </div>
         <ChevronRight size={18} />
       </Link>
+      <SavingsCard />
       {hasData && (
         <>
           <SectionTitle

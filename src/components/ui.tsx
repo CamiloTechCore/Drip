@@ -20,6 +20,7 @@ import {
   Shirt,
   PiggyBank,
 } from "lucide-react";
+import { isSavingsDeposit, isSavingsWithdrawal } from "../lib/analytics";
 import { money } from "../lib/format";
 import type { Categoria, Registro } from "../types";
 
@@ -27,7 +28,7 @@ export function Brand() {
   return (
     <span className="brand">
       <span className="brand-icon">
-        <Droplets size={22} fill="currentColor" strokeWidth={1.3} />
+        <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" width="48" height="48" />
       </span>
       drip<span className="brand-dot">.</span>
     </span>
@@ -36,11 +37,13 @@ export function Brand() {
 export function Card({
   children,
   className = "",
+  onClick,
 }: {
   children: ReactNode;
   className?: string;
+  onClick?: () => void;
 }) {
-  return <section className={`card ${className}`}>{children}</section>;
+  return <section className={`card ${className}`} onClick={onClick}>{children}</section>;
 }
 export function Empty({
   title = "Todavía no hay movimientos",
@@ -242,6 +245,7 @@ export function RecordRow({
   onClick?: () => void;
 }) {
   const income = record.tipo === "ingreso";
+  const savingsLabel = isSavingsDeposit(record) ? "Aporte de ahorro" : isSavingsWithdrawal(record) ? "Retiro de ahorro" : "";
   return (
     <button
       className="record-row"
@@ -258,7 +262,7 @@ export function RecordRow({
             : record.descripcion || record.categoria || "Movimiento"}
         </strong>
         <span>
-          {record.categoria || "Un paso hacia tu meta"}
+          {savingsLabel || record.categoria || "Un paso hacia tu meta"}
           {pending && (
             <CloudUpload size={13} aria-label="Pendiente de sincronizar" />
           )}

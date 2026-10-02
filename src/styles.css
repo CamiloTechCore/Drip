@@ -121,13 +121,20 @@ svg {
   line-height: 1;
 }
 .brand-icon {
-  height: 34px;
-  width: 30px;
+  height: 48px;
+  width: 48px;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--primary);
   margin-right: 5px;
+}
+.brand-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .brand-dot {
   color: var(--primary);
@@ -596,11 +603,11 @@ svg {
   width: 100%;
   max-width: 430px;
   display: grid;
-  grid-template-columns: 1fr 1.2fr 1fr 1fr 0.8fr;
+  grid-template-columns: 1fr 1.2fr 1fr 1fr 1fr 0.6fr;
   background: #ffffffed;
   backdrop-filter: blur(18px);
   border-top: 1px solid #e9ebf1;
-  padding: 11px 15px calc(12px + env(safe-area-inset-bottom));
+  padding: 11px 10px calc(12px + env(safe-area-inset-bottom));
   z-index: 30;
   box-shadow: 0 -5px 20px #27283903;
 }
@@ -2198,4 +2205,251 @@ input::placeholder {
 }
 .record-amount {
   font-size: 0.8rem;
+}
+
+/* Wishes/Teams styles */
+.teams-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.team-card {
+  cursor: pointer;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.team-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px #5551e81c;
+}
+.team-icon {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 16px;
+  background: #f4f3fc;
+  color: #9188bd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.team-card h3 {
+  font-size: 1rem;
+  font-weight: 550;
+  color: #4b4f68;
+  margin: 0;
+}
+.team-card p {
+  font-size: 0.75rem;
+  color: #85899b;
+  margin: 4px 0 0;
+}
+.team-arrow {
+  font-size: 1.2rem;
+  color: #9c9fb0;
+  margin-left: auto;
+}
+.wallet-card {
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.wallet-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.wallet-header h2 {
+  font-size: 1.1rem;
+  font-weight: 550;
+  color: #4b4f68;
+  margin: 0;
+}
+.wallet-balance {
+  text-align: center;
+  padding: 20px 0;
+}
+.wallet-amount {
+  font-size: 2.2rem;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: -1px;
+}
+.wallet-label {
+  font-size: 0.75rem;
+  color: #85899b;
+  margin-top: 4px;
+}
+.wallet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.wallet-actions .button {
+  flex: 1;
+  font-size: 0.85rem;
+}
+.wishes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wish-card {
+  padding: 16px;
+}
+.wish-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+}
+.wish-info {
+  flex: 1;
+  min-width: 0;
+}
+.wish-info h3 {
+  font-size: 0.95rem;
+  font-weight: 550;
+  color: #4b4f68;
+  margin: 0 0 4px;
+}
+.wish-info p {
+  font-size: 0.8rem;
+  color: #85899b;
+  margin: 0;
+  line-height: 1.4;
+}
+.wish-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.status-badge.approved {
+  background: #e2f2e8;
+  color: #77a288;
+}
+.status-badge.pending {
+  background: #fff6df;
+  color: #ac7717;
+}
+.wish-progress {
+  margin: 12px 0;
+}
+.progress-bar {
+  height: 8px;
+  background: #f0f1f6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 8px;
+  transition: width 0.3s ease;
+}
+.progress-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #85899b;
+  margin-top: 6px;
+}
+.wish-votes {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.vote-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  border: 1px solid #e6e8ef;
+  background: white;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  color: #9093a2;
+  transition: all 0.2s;
+}
+.vote-button.active {
+  border-color: #827bee;
+  background: #f7f6ff;
+  color: var(--primary);
+}
+.vote-button:active {
+  transform: scale(0.98);
+}
+.wish-details {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e9ebf1;
+}
+.wish-comments h4 {
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: #4b4f68;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.no-comments {
+  font-size: 0.8rem;
+  color: #9396a7;
+  margin: 0 0 12px;
+}
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.comment {
+  background: #f7f8fa;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.comment-author {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--primary);
+  margin-bottom: 4px;
+}
+.comment p {
+  font-size: 0.8rem;
+  color: #565b72;
+  margin: 0;
+  line-height: 1.4;
+}
+.comment-form {
+  display: flex;
+  gap: 8px;
+}
+.comment-form input {
+  flex: 1;
+  min-height: 40px;
+  font-size: 0.85rem;
+}
+.comment-form .button {
+  min-height: 40px;
+  padding: 10px 16px;
+}
+.form-hint {
+  font-size: 0.7rem;
+  color: #9a9cac;
+  margin-top: 4px;
 }

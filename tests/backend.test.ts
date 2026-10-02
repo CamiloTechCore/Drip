@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createContext, runInContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DataSet, Registro, Recurrente } from '../src/types';
+import type { DataSet, Registro, Recurrente, Team, Deseo, TeamWallet } from '../src/types';
 
 type Cell = string | number | boolean | Date;
 type Envelope<T = unknown> = { ok: boolean; data: T; error?: string; service?: string };
@@ -110,7 +110,7 @@ describe('single-file Apps Script API', () => {
 
   it('keeps health public and rejects unknown actions before opening or writing the sheet', () => {
     const api = harness();
-    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.05' });
+    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.06' });
     expect(api.post({ action: 'not-a-real-action' }).error).toBe('UNKNOWN_ACTION');
     expect(api.sheets.size).toBe(0);
     expect(api.lockCount).toBe(0);
@@ -119,7 +119,7 @@ describe('single-file Apps Script API', () => {
   it('creates exactly the specified sheets and preserves records on repeated setup', () => {
     const api = harness();
     api.setup();
-    expect([...api.sheets.keys()]).toEqual(['Registros', 'Categorias', 'Deudas', 'Recurrentes', 'Config', 'Usuarios']);
+    expect([...api.sheets.keys()]).toEqual(['Registros', 'Categorias', 'Deudas', 'Recurrentes', 'Config', 'Usuarios', 'Teams', 'Deseos', 'Votos', 'Comentarios', 'TeamWallets']);
     expect(api.post({ action: 'upsert', registro: expense() }).ok).toBe(true);
     api.setup();
     const listed = api.post<DataSet>({ action: 'list' });
@@ -348,5 +348,86 @@ describe('single-file Apps Script API', () => {
     expect(owned.usuario_id).toBe(user.id);
     const legacy = api.post<Registro>({ action: 'upsert', registro: expense({ id: 'legacy-1' }) }).data;
     expect(legacy.usuario_id).toBe('');
+  });
+
+  it('creates an idempotent team with a complete API shape and one zero-balance wallet', () => {
+    const api = harness();
+    const user = api.post<{ id: string }>({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'Clave123!' }).data;
+    const command = { action: 'createTeam', id: 'team-viaje', nombre: 'Nuestro viaje', usuario_id: user.id };
+    const first = api.post<Team>(command);
+    expect(first.ok).toBe(true);
+    expect(first.data).toMatchObject({ id: 'team-viaje', nombre: 'Nuestro viaje', creador_id: user.id, miembros: [user.id], activo: true });
+    expect(first.data.creado_en).toBeTruthy();
+    expect(api.post<Team>(command).data).toEqual(first.data);
+    const listed = api.post<{ teams: Team[]; team_wallets: TeamWallet[] }>({ action: 'list', since: '2026-10-01T00:00:00.000Z' }).data;
+    expect(listed.teams).toHaveLength(1);
+    expect(listed.team_wallets).toHaveLength(1);
+    expect(listed.team_wallets[0].saldo).toBe(0);
+    expect(api.sheets.get('Teams')!.values[1][3]).toBe(JSON.stringify([user.id]));
+  });
+
+  it('loads existing Teams JSON members and string booleans without altering saved rows or wallets', () => {
+    const api = harness();
+    api.setup();
+    const teams = api.sheets.get('Teams')!;
+    const wallets = api.sheets.get('TeamWallets')!;
+    teams.values[1] = ['existing-team', 'Ahorro casa', 'owner', '["partner","partner"]', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z', 'TRUE'];
+    teams.values[2] = ['inactive-team', 'Anterior', 'owner', '["owner"]', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z', 'FALSE'];
+    wallets.values[1] = ['existing-team', 123456, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z'];
+    const saved = teams.values[1].slice();
+    const listed = api.post<{ teams: Team[]; team_wallets: TeamWallet[] }>({ action: 'list' }).data;
+    expect(listed.teams[0].miembros).toEqual(['owner', 'partner']);
+    expect(listed.teams[0].activo).toBe(true);
+    expect(listed.teams[1].activo).toBe(false);
+    expect(listed.team_wallets[0].saldo).toBe(123456);
+    expect(teams.values[1]).toEqual(saved);
+    api.setup();
+    expect(teams.values[1]).toEqual(saved);
+    expect(wallets.values[1][1]).toBe(123456);
+  });
+
+  it('keeps the creator visible when legacy membership JSON is malformed without rewriting it', () => {
+    const api = harness();
+    api.setup();
+    const row: Cell[] = ['legacy-team', 'Pareja', 'owner', '[invalid', '', '', true];
+    api.sheets.get('Teams')!.values[1] = row.slice();
+    const listed = api.post<{ teams: Team[] }>({ action: 'list' });
+    expect(listed.ok).toBe(true);
+    expect(listed.data.teams[0].miembros).toEqual(['owner']);
+    expect(api.sheets.get('Teams')!.values[1]).toEqual(row);
+  });
+
+  it('returns nested wish votes/comments and counts members instead of membership JSON characters', () => {
+    const api = harness();
+    const owner = api.post<{ id: string }>({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'Clave123!' }).data.id;
+    const partner = api.post<{ id: string }>({ action: 'register', nombre: 'Luis', correo: 'luis@example.com', password: 'Clave123!' }).data.id;
+    const team = api.post<Team>({ action: 'createTeam', id: 'team-1', nombre: 'Pareja', usuario_id: owner }).data;
+    const invitation = { action: 'inviteToTeam', team_id: team.id, correo: 'luis@example.com', usuario_id: owner };
+    expect(api.post<Team>(invitation).data.miembros).toEqual([owner, partner]);
+    expect(api.post<Team>(invitation).data.miembros).toEqual([owner, partner]);
+    const wishCommand = { action: 'createWish', id: 'wish-1', team_id: team.id, titulo: 'Vacaciones', descripcion: 'Juntos', monto_objetivo: 1500000, usuario_id: owner };
+    expect(api.post<Deseo>(wishCommand).data.votos).toEqual([]);
+    api.post(wishCommand);
+    expect(api.post<{ aprobado: boolean }>({ action: 'voteWish', deseo_id: 'wish-1', usuario_id: owner, tipo: 'like' }).data.aprobado).toBe(false);
+    expect(api.post<{ aprobado: boolean }>({ action: 'voteWish', deseo_id: 'wish-1', usuario_id: partner, tipo: 'like' }).data.aprobado).toBe(true);
+    const commentCommand = { action: 'addComment', id: 'comment-1', deseo_id: 'wish-1', usuario_id: partner, texto: 'Me encanta' };
+    api.post(commentCommand); api.post(commentCommand);
+    const listed = api.post<{ deseos: Deseo[] }>({ action: 'list' }).data;
+    expect(listed.deseos).toHaveLength(1);
+    expect(listed.deseos[0].votos).toHaveLength(2);
+    expect(listed.deseos[0].comentarios).toHaveLength(1);
+    expect(listed.deseos[0].aprobado).toBe(true);
+    expect(api.post<{ aprobado: boolean }>({ action: 'voteWish', deseo_id: 'wish-1', usuario_id: partner, tipo: 'revision' }).data.aprobado).toBe(false);
+  });
+
+  it('rejects a nonmember and insufficient wallet withdrawals without changing the balance', () => {
+    const api = harness();
+    const owner = api.post<{ id: string }>({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'Clave123!' }).data.id;
+    const outsider = api.post<{ id: string }>({ action: 'register', nombre: 'Luis', correo: 'luis@example.com', password: 'Clave123!' }).data.id;
+    const team = api.post<Team>({ action: 'createTeam', nombre: 'Pareja', usuario_id: owner }).data;
+    expect(api.post({ action: 'createWish', team_id: team.id, usuario_id: outsider, titulo: 'No', monto_objetivo: 100 }).error).toBe('UNAUTHORIZED');
+    expect(api.post({ action: 'addToWallet', team_id: team.id, usuario_id: owner, monto: 100 }).ok).toBe(true);
+    expect(api.post({ action: 'withdrawFromWallet', team_id: team.id, usuario_id: owner, monto: 200 }).error).toBe('INSUFFICIENT_FUNDS');
+    expect(api.post<{ team_wallets: TeamWallet[] }>({ action: 'list' }).data.team_wallets[0].saldo).toBe(100);
   });
 });

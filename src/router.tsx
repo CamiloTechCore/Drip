@@ -3,12 +3,14 @@ import Home from "./pages/Home";
 import Movimientos from "./pages/Movimientos";
 import Analisis from "./pages/Analisis";
 import Mas from "./pages/Mas";
+import Wishes from "./pages/Wishes";
 export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/movimientos" element={<Movimientos />} />
       <Route path="/analisis" element={<Analisis />} />
+      <Route path="/wishes" element={<Wishes />} />
       <Route path="/mas" element={<Mas />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

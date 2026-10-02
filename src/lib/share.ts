@@ -20,7 +20,7 @@ export function summaryText(data: DataSet, start: string, end: string): string {
   const totals = getTotals(data.registros, start, end);
   const debt = getDebtSummary(data.deudas, data.registros, end);
   const amount = (value: number) => money(value, data.config.moneda);
-  return `Mi resumen Drip · ${start} al ${end}\nIngresos: ${amount(totals.income)}\nGastos: ${amount(totals.expenses)}\nAhorro neto: ${amount(totals.savings)}\nPagos a deuda: ${amount(totals.debtPayments)}\nSaldo de deuda estimado: ${amount(debt.balance)}`;
+  return `Mi resumen Drip · ${start} al ${end}\nIngresos: ${amount(totals.income)}\nGastos: ${amount(totals.expenses)}\nAhorro neto: ${amount(totals.savings)}\nPagos a deuda (incluidos en gastos): ${amount(totals.debtPayments)}\nSaldo de deuda estimado: ${amount(debt.balance)}`;
 }
 
 /** Prevent spreadsheet formula execution, including payloads hidden behind whitespace. */

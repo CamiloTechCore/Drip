@@ -3,14 +3,14 @@ import { EMPTY_DATA } from '../lib/defaults';
 import { createDemoData } from '../lib/demo';
 import { today } from '../lib/format';
 import { validateConfig, validateEmail, validateEntity, validateLoginPassword, validateName, validatePassword, validateRegistro } from './validation';
-import type { Categoria, Config, DataSet, Entity, EntityName, Recurrente, Registro, Usuario } from '../types';
+import type { Categoria, Config, DataSet, Entity, EntityName, Recurrente, Registro, Usuario, Team, Deseo, Voto, Comentario, TeamWallet } from '../types';
 import type { Settings } from '../store/settings';
 
 export type Operation = { action: 'upsert'; registro: Registro } | { action: 'delete'; id: string; actualizado_en: string };
 export interface QueuedOperation { queueId: string; operation: Operation }
 export interface CacheState { version: 1; data: DataSet; queue: QueuedOperation[]; cursor: string | null }
 export interface Account { namespace: string; settings: Settings }
-type ListResponse = DataSet & { serverTime: string };
+export type ListResponse = DataSet & { serverTime: string };
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string; message?: string };
 export const MISSING_CONNECTION_MESSAGE = 'Este despliegue no tiene una conexión configurada. Añade VITE_APPS_SCRIPT_URL en las variables de entorno de Vercel y vuelve a desplegar.';
 export class ApiError extends Error {
@@ -60,7 +60,10 @@ export async function readCache(account: Account): Promise<CacheState> {
   return locked(`drip:store:${account.namespace}`, async () => {
     let state: CacheState = emptyState(account);
     // An IndexedDB readwrite transaction also protects older Safari without Web Locks.
-    await update<CacheState>(key(account), stored => { state = stored?.version === 1 ? stored : state; return state; });
+    await update<CacheState>(key(account), stored => {
+      state = stored?.version === 1 ? { ...stored, data: mergeListData(stored.data, stored.data, stored.queue) } : state;
+      return state;
+    });
     return state;
   });
 }
@@ -125,11 +128,12 @@ function assertConnection(account: Account): void {
   if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('Sin conexión. Los movimientos se sincronizarán cuando vuelva la red.');
 }
 
-export async function request<T>(account: Account, payload: Record<string, unknown>): Promise<T> {
+export async function request<T>(account: Account, payload: Record<string, unknown>, options: { retry?: boolean } = {}): Promise<T> {
   assertConnection(account);
   let lastError: Error = new Error('No fue posible conectar con Google Sheets.');
   let hadTransportFailure = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const attempts = options.retry === false ? 1 : 3;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45_000);
     try {
@@ -158,7 +162,7 @@ export async function request<T>(account: Account, payload: Record<string, unkno
       lastError = error instanceof Error ? error : new Error('Error de conexión.');
       if (lastError instanceof ApiError) throw lastError;
       hadTransportFailure = true;
-      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 600 * 2 ** attempt));
+      if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 600 * 2 ** attempt));
     } finally { clearTimeout(timeout); }
   }
   throw new Error(lastError.name === 'AbortError' ? 'Google Sheets tardó demasiado. Tus cambios siguen guardados; vuelve a sincronizar.' : lastError.message);
@@ -227,10 +231,78 @@ async function syncUnlocked(account: Account): Promise<void> {
     }
     const beforeList = await readCache(account);
     const result = await request<ListResponse>(account, { action: 'list', ...(beforeList.cursor ? { since: beforeList.cursor } : {}) });
-    await changeCache(account, current => ({
-      ...current, cursor: result.serverTime,
-      data: { categorias: result.categorias, deudas: result.deudas, recurrentes: result.recurrentes, config: result.config, registros: mergeRegistros(current.data.registros, result.registros, current.queue) },
+    await changeCache(account, current => ({ ...current, cursor: result.serverTime, data: mergeListData(current.data, result, current.queue) }));
+}
+
+function members(value: unknown, fallback: string[] = []): string[] {
+  let parsed: unknown = value;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed) as unknown; } catch { return fallback; }
+  }
+  return Array.isArray(parsed) ? [...new Set(parsed.filter((member): member is string => typeof member === 'string' && member.length > 0))] : fallback;
+}
+export function normalizeTeam(team: Team, previous?: Team): Team {
+  return {
+    ...previous, ...team,
+    miembros: members(team.miembros, previous?.miembros ?? (team.creador_id ? [team.creador_id] : [])),
+    creado_en: team.creado_en ?? previous?.creado_en ?? '',
+    actualizado_en: team.actualizado_en ?? previous?.actualizado_en ?? '',
+    activo: typeof team.activo === 'boolean' ? team.activo : team.activo === undefined ? previous?.activo ?? true : String(team.activo).toLowerCase() === 'true',
+  };
+}
+function hydrateWish(wish: Deseo, votes?: Voto[], comments?: Comentario[], previous?: Deseo): Deseo {
+  return {
+    ...previous, ...wish,
+    votos: Array.isArray(wish.votos) ? wish.votos : votes ? votes.filter(vote => vote.deseo_id === wish.id) : previous?.votos ?? [],
+    comentarios: Array.isArray(wish.comentarios) ? wish.comentarios : comments ? comments.filter(comment => comment.deseo_id === wish.id) : previous?.comentarios ?? [],
+  };
+}
+/** Only registros are incremental. Optional collaborative arrays are full snapshots when supplied. */
+export function mergeListData(current: DataSet, incoming: DataSet, queue: QueuedOperation[] = []): DataSet {
+  const next: DataSet = {
+    ...current,
+    categorias: incoming.categorias ?? current.categorias,
+    deudas: incoming.deudas ?? current.deudas,
+    recurrentes: incoming.recurrentes ?? current.recurrentes,
+    config: incoming.config ?? current.config,
+    registros: mergeRegistros(current.registros, incoming.registros ?? [], queue),
+  };
+  if (Array.isArray(incoming.teams)) next.teams = incoming.teams.map(team => normalizeTeam(team, current.teams?.find(existing => existing.id === team.id)));
+  if (Array.isArray(incoming.votos)) next.votos = incoming.votos;
+  if (Array.isArray(incoming.comentarios)) next.comentarios = incoming.comentarios;
+  if (Array.isArray(incoming.team_wallets)) next.team_wallets = incoming.team_wallets;
+  if (Array.isArray(incoming.deseos)) {
+    next.deseos = incoming.deseos.map(wish => hydrateWish(wish, incoming.votos, incoming.comentarios, current.deseos?.find(existing => existing.id === wish.id)));
+  } else if (current.deseos && (Array.isArray(incoming.votos) || Array.isArray(incoming.comentarios))) {
+    next.deseos = current.deseos.map(wish => ({
+      ...wish,
+      votos: Array.isArray(incoming.votos) ? incoming.votos.filter(vote => vote.deseo_id === wish.id) : wish.votos,
+      comentarios: Array.isArray(incoming.comentarios) ? incoming.comentarios.filter(comment => comment.deseo_id === wish.id) : wish.comentarios,
     }));
+  }
+  return next;
+}
+
+export async function listData(account: Account): Promise<ListResponse> {
+  const result = await request<ListResponse>(account, { action: 'list' });
+  const current = await readCache(account);
+  return { ...mergeListData(current.data, result, current.queue), serverTime: result.serverTime };
+}
+
+export function selectUserData(data: DataSet, userId: string | undefined, isDemo = false): DataSet {
+  if (isDemo) return data;
+  if (!userId) return EMPTY_DATA;
+  const teams = data.teams?.filter(team => team.creador_id === userId || members(team.miembros).includes(userId));
+  const teamIds = new Set(teams?.map(team => team.id));
+  const deseos = data.deseos?.filter(wish => teamIds.has(wish.team_id));
+  const wishIds = new Set(deseos?.map(wish => wish.id));
+  return {
+    ...data, registros: data.registros.filter(record => record.usuario_id === userId),
+    ...(teams ? { teams } : {}), ...(deseos ? { deseos } : {}),
+    ...(data.votos ? { votos: data.votos.filter(vote => !!vote.deseo_id && wishIds.has(vote.deseo_id)) } : {}),
+    ...(data.comentarios ? { comentarios: data.comentarios.filter(comment => !!comment.deseo_id && wishIds.has(comment.deseo_id)) } : {}),
+    ...(data.team_wallets ? { team_wallets: data.team_wallets.filter(wallet => teamIds.has(wallet.team_id)) } : {}),
+  };
 }
 
 function applyEntity(state: CacheState, entity: EntityName, data: Entity): CacheState {
@@ -343,4 +415,68 @@ export async function importLocalRecords(account: Account): Promise<number> {
     return { ...state, queue, data: { ...state.data, registros: [...state.data.registros, ...imported] } };
   });
   return count;
+}
+
+// Teams and Wishes API functions
+function upsertItem<T extends { id: string }>(rows: T[] | undefined, item: T): T[] {
+  return [...(rows ?? []).filter(row => row.id !== item.id), item];
+}
+async function cacheTeam(account: Account, value: Team): Promise<Team> {
+  let team = value;
+  await changeCache(account, state => {
+    team = normalizeTeam(value, state.data.teams?.find(existing => existing.id === value.id));
+    return { ...state, data: { ...state.data, teams: upsertItem(state.data.teams, team) } };
+  });
+  return team;
+}
+export async function createTeam(account: Account, nombre: string, usuario_id: string): Promise<Team> {
+  const result = await request<Team>(account, { action: 'createTeam', id: crypto.randomUUID(), nombre, usuario_id });
+  return cacheTeam(account, result);
+}
+
+export async function inviteToTeam(account: Account, team_id: string, correo: string, usuario_id: string): Promise<Team> {
+  return cacheTeam(account, await request<Team>(account, { action: 'inviteToTeam', team_id, correo, usuario_id }));
+}
+
+export async function createWish(account: Account, team_id: string, titulo: string, descripcion: string, monto_objetivo: number, usuario_id: string): Promise<Deseo> {
+  const result = await request<Deseo>(account, { action: 'createWish', id: crypto.randomUUID(), team_id, titulo, descripcion, monto_objetivo, usuario_id });
+  let wish = result;
+  await changeCache(account, state => {
+    wish = hydrateWish(result, state.data.votos, state.data.comentarios, state.data.deseos?.find(existing => existing.id === result.id));
+    return { ...state, data: { ...state.data, deseos: upsertItem(state.data.deseos, wish) } };
+  });
+  return wish;
+}
+
+export async function voteWish(account: Account, deseo_id: string, tipo: 'like' | 'dislike' | 'revision', usuario_id: string): Promise<{ deseo_id: string; tipo: string; aprobado: boolean }> {
+  const result = await request<{ deseo_id: string; tipo: string; aprobado: boolean }>(account, { action: 'voteWish', deseo_id, tipo, usuario_id });
+  await changeCache(account, state => ({ ...state, data: { ...state.data, deseos: state.data.deseos?.map(wish => wish.id === result.deseo_id ? { ...wish, aprobado: result.aprobado } : wish) } }));
+  return result;
+}
+
+export async function addComment(account: Account, deseo_id: string, texto: string, usuario_id: string): Promise<Comentario> {
+  const result = await request<Comentario>(account, { action: 'addComment', id: crypto.randomUUID(), deseo_id, texto, usuario_id });
+  const comment = { ...result, deseo_id: result.deseo_id ?? deseo_id };
+  await changeCache(account, state => ({ ...state, data: {
+    ...state.data, comentarios: upsertItem(state.data.comentarios, comment),
+    deseos: state.data.deseos?.map(wish => wish.id === deseo_id ? { ...wish, comentarios: upsertItem(wish.comentarios, comment) } : wish),
+  } }));
+  return comment;
+}
+
+async function cacheWallet(account: Account, value: { team_id: string; saldo: number }): Promise<void> {
+  await changeCache(account, state => {
+    const previous = state.data.team_wallets?.find(wallet => wallet.team_id === value.team_id);
+    const wallet: TeamWallet = { creado_en: previous?.creado_en ?? '', actualizado_en: previous?.actualizado_en ?? '', ...value };
+    return { ...state, data: { ...state.data, team_wallets: [...(state.data.team_wallets ?? []).filter(existing => existing.team_id !== value.team_id), wallet] } };
+  });
+}
+export async function addToWallet(account: Account, team_id: string, monto: number, usuario_id: string): Promise<{ team_id: string; saldo: number }> {
+  const result = await request<{ team_id: string; saldo: number }>(account, { action: 'addToWallet', team_id, monto, usuario_id }, { retry: false });
+  await cacheWallet(account, result); return result;
+}
+
+export async function withdrawFromWallet(account: Account, team_id: string, monto: number, usuario_id: string): Promise<{ team_id: string; saldo: number }> {
+  const result = await request<{ team_id: string; saldo: number }>(account, { action: 'withdrawFromWallet', team_id, monto, usuario_id }, { retry: false });
+  await cacheWallet(account, result); return result;
 }

@@ -81,8 +81,12 @@ export function useData() {
     const count = await client.importLocalRecords(requireAccount()); await afterLocalWrite(); return count;
   }, [requireAccount, afterLocalWrite]);
   const ids = useMemo(() => query.data ? client.pendingIds(query.data) : new Set<string>(), [query.data]);
+  const filteredData = useMemo(() => {
+    if (!query.data) return EMPTY_DATA;
+    return client.selectUserData(query.data.data, user?.id, settings.isDemo);
+  }, [query.data, user?.id, settings.isDemo]);
   return {
-    data: query.data?.data ?? EMPTY_DATA,
+    data: filteredData,
     loading: !account || query.isLoading,
     pending: query.data?.queue.length ?? 0,
     pendingIds: ids,
