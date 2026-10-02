@@ -217,6 +217,9 @@
 }
 
 @media (max-width: 599px) {
+  .app-shell:not(.app-shell--auth) main {
+    min-height: auto;
+  }
   .app-shell:not(.app-shell--auth) .bottom-nav {
     grid-template-columns: 0.85fr 1.2fr 0.9fr 1.2fr 0.85fr;
   }
@@ -620,7 +623,7 @@
   .app-shell:not(.app-shell--auth) {
     --sidebar-width: 224px;
     --page-gutter: 36px;
-    max-width: 1440px;
+    max-width: none;
     padding-left: var(--sidebar-width);
   }
 
@@ -702,6 +705,20 @@
     overflow-y: auto;
     backdrop-filter: none;
   }
+  .app-shell:not(.app-shell--auth) .app-footer {
+    position: fixed;
+    left: var(--sidebar-width);
+    right: 0;
+    bottom: 0;
+    z-index: 34;
+    min-height: 42px;
+    padding: 10px 24px;
+    background: #f7f8faeF;
+    border-top: 1px solid #e5e8f0;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+  .app-shell:not(.app-shell--auth) main { padding-bottom: 48px; }
 
   .app-shell:not(.app-shell--auth) .bottom-nav > a {
     flex-direction: row;

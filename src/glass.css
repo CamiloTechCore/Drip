@@ -34,7 +34,22 @@
 }
 /* Six tabs remain readable and tappable at 320px after adding Deseos. */
 @media (max-width: 599px) {
+  .app-shell:not(.app-shell--auth) .app-footer {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    width: 100%;
+    min-height: 58px;
+    margin-top: 8px;
+    padding: 14px 16px calc(92px + env(safe-area-inset-bottom));
+    background: #f7f8fa;
+  }
   .app-shell:not(.app-shell--auth) .bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0;

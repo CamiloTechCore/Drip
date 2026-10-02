@@ -9,3 +9,4 @@ dist/
 coverage/
 git 
 backend/Code.gs
+.vscode/

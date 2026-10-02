@@ -28,6 +28,7 @@
 body {
   margin: 0;
   min-width: 0;
+  overflow-x: hidden;
 }
 button,
 input,
@@ -99,11 +100,85 @@ svg {
   flex-shrink: 0;
 }
 .app-shell {
-  max-width: 430px;
+  width: 100%;
+  max-width: 100%;
   min-height: 100dvh;
   margin: 0 auto;
   position: relative;
   background: #f7f8fa;
+}
+.bubble-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  background: radial-gradient(ellipse at 30% 100%, #9d35ff9f, transparent 0%);
+}
+.bubble-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, #f7f8fa18 0%, transparent 32%, transparent 72%, #f7f8fa2e 0%);
+}
+.bubble-background span {
+  position: absolute;
+  left: var(--bubble-left);
+  bottom: -80px;
+  width: var(--bubble-size);
+  height: var(--bubble-size);
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(circle at 32% 25%, #fff9, #9e9aff33 42%, #6f68e808 74%);
+  border: 1px solid #aaa8f52e;
+  box-shadow: inset -5px -7px 12px #756de813, 0 0 18px #a9a5ff16;
+  animation: drip-bubble-rise var(--bubble-duration) var(--bubble-delay) ease-in-out infinite;
+}
+.bubble-background span:nth-child(1){--bubble-left:7%;--bubble-size:18px;--bubble-duration:18s;--bubble-delay:-1s}
+.bubble-background span:nth-child(2){--bubble-left:16%;--bubble-size:34px;--bubble-duration:24s;--bubble-delay:-9s}
+.bubble-background span:nth-child(3){--bubble-left:25%;--bubble-size:12px;--bubble-duration:16s;--bubble-delay:-4s}
+.bubble-background span:nth-child(4){--bubble-left:34%;--bubble-size:25px;--bubble-duration:22s;--bubble-delay:-13s}
+.bubble-background span:nth-child(5){--bubble-left:44%;--bubble-size:42px;--bubble-duration:28s;--bubble-delay:-6s}
+.bubble-background span:nth-child(6){--bubble-left:54%;--bubble-size:15px;--bubble-duration:17s;--bubble-delay:-11s}
+.bubble-background span:nth-child(7){--bubble-left:63%;--bubble-size:28px;--bubble-duration:23s;--bubble-delay:-17s}
+.bubble-background span:nth-child(8){--bubble-left:72%;--bubble-size:11px;--bubble-duration:15s;--bubble-delay:-3s}
+.bubble-background span:nth-child(9){--bubble-left:81%;--bubble-size:38px;--bubble-duration:27s;--bubble-delay:-19s}
+.bubble-background span:nth-child(10){--bubble-left:91%;--bubble-size:20px;--bubble-duration:20s;--bubble-delay:-8s}
+.bubble-background span:nth-child(11){--bubble-left:12%;--bubble-size:10px;--bubble-duration:16s;--bubble-delay:-12s}
+.bubble-background span:nth-child(12){--bubble-left:39%;--bubble-size:16px;--bubble-duration:19s;--bubble-delay:-15s}
+.bubble-background span:nth-child(13){--bubble-left:69%;--bubble-size:22px;--bubble-duration:21s;--bubble-delay:-7s}
+.bubble-background span:nth-child(14){--bubble-left:86%;--bubble-size:13px;--bubble-duration:18s;--bubble-delay:-14s}
+@keyframes drip-bubble-rise {
+  0% { transform: translate3d(0, 0, 0) scale(.7); opacity: 0; }
+  10% { opacity: .58; }
+  46% { opacity: .38; }
+  72% { opacity: .16; transform: translate3d(22px, -72vh, 0) scale(1.15); }
+  100% { opacity: 0; transform: translate3d(-18px, -112vh, 0) scale(1.28); }
+}
+.app-shell > :not(.bubble-background):not(.bottom-nav):not(.app-footer) { position: relative; z-index: 1; }
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 12px 20px calc(22px + env(safe-area-inset-bottom));
+  color: #7b8093;
+  font-size: .72rem;
+  letter-spacing: .01em;
+  text-align: center;
+}
+.app-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5a55d9;
+  font-weight: 600;
+}
+.app-footer a:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) {
+  .bubble-background span { animation: none; opacity: .14; transform: translateY(-18vh); }
 }
 .app-header {
   display: flex;

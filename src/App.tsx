@@ -29,6 +29,8 @@ import { useData } from "./hooks/useData";
 import { useAuth } from "./store/auth";
 import { AppContext } from "./context";
 import { Brand } from "./components/ui";
+import BubbleBackground from "./components/BubbleBackground";
+import AppFooter from "./components/AppFooter";
 import SavingsSheet from "./components/SavingsSheet";
 import { isSavingsDeposit, isSavingsWithdrawal } from "./lib/analytics";
 import type { SavingsMode } from "./lib/savings";
@@ -123,6 +125,7 @@ function DripApp() {
   return (
     <AppContext.Provider value={{ ...model, add, openSavings, share, toast: setMessage }}>
       <div className={`app-shell${needsAuth ? " app-shell--auth" : ""}`}>
+        <BubbleBackground />
         {needsAuth ? (
           <Login />
         ) : (
@@ -224,6 +227,7 @@ function DripApp() {
             </motion.div>
           )}
         </main>
+        <AppFooter />
         <nav className="bottom-nav" aria-label="Navegación principal">
           <NavLink to="/" end>
             <Home size={21} />

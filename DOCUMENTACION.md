@@ -584,12 +584,18 @@ interface TeamWallet {
 
 ### Cambios validados — 2026-10-02
 
-- Se conservó `LOGO.png` en la raíz y se usa como identidad visual: el encabezado muestra el icono ampliado, el favicon y los iconos PWA se generan desde `public/logo.png`.
+- Se conservó `logo.png` en la raíz y se usa como identidad visual: el encabezado muestra el icono ampliado, el favicon y los iconos PWA se generan desde `public/logo.png`.
 - Se añadió una capa visual de cristal líquido con degradados, bordes y sombras suaves en tarjetas, equipos, deseos, carteras y formularios. Incluye fallback sin `backdrop-filter` y mantiene objetivos táctiles para móvil.
 - Se añadió la tarjeta de ahorro. Los aportes se guardan como gasto con el tag reservado `ahorro_deposito`; los retiros como ingreso con `ahorro_retiro`, por lo que no se requiere migrar las columnas de Sheets. La racha cuenta días calendario completos desde el aporte, acumula mientras el saldo sea positivo y se reinicia con cualquier retiro; un depósito adicional no la reinicia. El saldo no se puede retirar por debajo de cero y las ediciones retroactivas se validan cronológicamente.
 - Los pagos `deuda_pago` se contabilizan una sola vez como gasto. Ya no se vuelven a restar del disponible, y se incluyen en categorías, PDF y resumen compartido.
 - Deseos ahora interpreta la respuesta de `client.request` correctamente (la función ya devuelve `data` desempaquetado), normaliza `miembros` tanto si llega como JSON desde Sheets como si llega como arreglo, conserva equipos/deseos en IndexedDB durante la sincronización y actualiza la caché después de crear un equipo.
 - Se validó el proyecto con `npm test` (103 pruebas) y `npm run build:vercel` (TypeScript estricto + Vite + comprobación de variable de Apps Script). No se modificaron registros reales ni se eliminaron archivos de datos.
+- Se añadió `BubbleBackground`, una capa CSS de burbujas gaseosas que nace en el pie, flota con gradiente y desaparece cerca de la mitad de la pantalla. Es decorativa, no captura eventos y respeta `prefers-reduced-motion`.
+- El espacio autenticado ocupa ahora todo el ancho disponible en escritorio y móvil; la barra lateral conserva su navegación sin dejar márgenes artificiales del antiguo límite de 1.440 px.
+- Se incorporó un footer global con derechos de autor `© Camilo Molina` y enlace a `https://github.com/CamiloTechCore`: queda fijo en la vista de PC y forma parte del flujo normal al final de cada sección en móvil.
+- La animación de burbujas se extendió a toda la altura del viewport: ahora ascienden de forma continua desde el footer hasta el header, con desfases negativos para mantener movimiento visible desde la primera carga y opacidad gradual para no competir con la interfaz.
+- Se corrigió la navegación móvil: una regla de apilamiento del fondo estaba convirtiendo accidentalmente la barra fija en contenido normal. Ahora permanece fija, respeta las safe areas y conserva espacio inferior para que no tape los controles.
+- El footer de autoría móvil se fijó explícitamente al flujo del documento, con espacio inferior para la navegación fija. Ahora aparece al llegar al final de todas las secciones, incluidas las pantallas cortas.
 
 ### Limitaciones de Apps Script
 
