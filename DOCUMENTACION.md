@@ -597,6 +597,7 @@ interface TeamWallet {
 - Se corrigió la navegación móvil: una regla de apilamiento del fondo estaba convirtiendo accidentalmente la barra fija en contenido normal. Ahora permanece fija, respeta las safe areas y conserva espacio inferior para que no tape los controles.
 - El footer de autoría móvil se fijó explícitamente al flujo del documento, con espacio inferior para la navegación fija. Ahora aparece al llegar al final de todas las secciones, incluidas las pantallas cortas.
 - Se corrigió el alineamiento de escritorio a pantalla completa: la barra lateral y el logo ya parten desde el borde izquierdo real del navegador y no se superponen sobre títulos, tarjetas ni el footer.
+- Se mejoró la validación de registros para asignar automáticamente una categoría por defecto ("Otros") cuando la categoría especificada no existe en la caché local. Esto permite que la sincronización de registros pendientes proceda incluso cuando uno de ellos tiene una categoría obsoleta o eliminada, resolviendo el error "La categoría no existe" y permitiendo que los 11 pendientes se procesen correctamente. La misma lógica se aplicó a las plantillas recurrentes para asignar una categoría de gasto por defecto cuando la especificada no existe.
 
 ### Limitaciones de Apps Script
 

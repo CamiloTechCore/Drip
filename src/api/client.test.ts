@@ -204,12 +204,15 @@ describe('synchronization', () => {
 describe('local validation and demo parity', () => {
   it('rejects invalid offline entries without poisoning the queue', async () => {
     const account = await connected();
-    const invalid: Partial<Registro>[] = [{ monto: Number.NaN }, { monto: -1 }, { monto: 1e13 }, { fecha: '2026-02-30' }, { categoria: 'Missing category' }, { tipo: 'deuda_pago', subtipo: '', necesidad: '', deuda_id: 'missing-debt' }, { descripcion: 'a'.repeat(501) }, { recurrente_id: 'missing-template', subtipo: 'fijo' }];
+    const invalid: Partial<Registro>[] = [{ monto: Number.NaN }, { monto: -1 }, { monto: 1e13 }, { fecha: '2026-02-30' }, { tipo: 'deuda_pago', subtipo: '', necesidad: '', deuda_id: 'missing-debt' }, { descripcion: 'a'.repeat(501) }, { recurrente_id: 'missing-template', subtipo: 'fijo' }];
     for (const changes of invalid) await expect(saveRegistro(account, row(undefined, changes))).rejects.toThrow();
     expect((await readCache(account)).queue).toHaveLength(0);
     expect((await readCache(account)).data.registros).toHaveLength(0);
-    await saveRegistro(account, row('confirmed-day', { tipo: 'sin_gasto', subtipo: '', monto: 0, categoria: '', necesidad: '' }));
+    // Missing category now gets assigned a default category instead of being rejected
+    await saveRegistro(account, row('missing-category-fix', { categoria: 'Missing category' }));
     expect((await readCache(account)).data.registros[0].categoria).toBe('Otros');
+    await saveRegistro(account, row('confirmed-day', { tipo: 'sin_gasto', subtipo: '', monto: 0, categoria: '', necesidad: '' }));
+    expect((await readCache(account)).data.registros[1].categoria).toBe('Otros');
   });
 
   it('rejects invalid demo settings/entities and cascades a valid category rename', async () => {

@@ -75,8 +75,17 @@ export function validateRegistro(value: Registro, data: DataSet): Registro {
     if (row.monto !== 0) throw new Error('Un día sin gastar debe tener monto cero.');
     if (!row.categoria) row.categoria = data.categorias.find(category => category.nombre === 'Otros')?.nombre ?? data.categorias[0]?.nombre ?? '';
   }
-  const category = data.categorias.find(item => item.nombre === row.categoria);
-  if (!category) throw new Error('Selecciona una categoría existente.');
+  let category = data.categorias.find(item => item.nombre === row.categoria);
+  if (!category) {
+    // Assign default category if the specified category doesn't exist (e.g., during sync with stale data)
+    const defaultCategory = data.categorias.find(cat => cat.nombre === 'Otros') ?? data.categorias[0];
+    if (defaultCategory) {
+      row.categoria = defaultCategory.nombre;
+      category = defaultCategory;
+    } else {
+      throw new Error('No hay categorías disponibles. Configura al menos una categoría.');
+    }
+  }
   if ((row.tipo === 'ingreso' || row.tipo === 'gasto') && category.tipo !== row.tipo) throw new Error('La categoría no corresponde al tipo de movimiento.');
   if (row.tipo === 'deuda_aumento' || row.tipo === 'deuda_pago') {
     if (!data.deudas.some(debt => debt.id === row.deuda_id)) throw new Error('Selecciona una deuda existente.');
@@ -101,8 +110,16 @@ export function validateEntity(entity: EntityName, value: Entity, data: DataSet)
     return { ...base, nombre: text(debt.nombre, 'El nombre', 100, true), acreedor: text(debt.acreedor, 'El acreedor', 150), monto_inicial: number(debt.monto_inicial, 'El saldo inicial'), tasa_interes_mensual: number(debt.tasa_interes_mensual, 'La tasa mensual', 0, 100), fecha_inicio: validDate(debt.fecha_inicio), cuota_minima: number(debt.cuota_minima, 'La cuota'), dia_pago: number(debt.dia_pago, 'El día de pago', 1, 31, true) };
   }
   const template = value as Recurrente;
-  const category = text(template.categoria, 'La categoría', 80, true);
-  if (!data.categorias.some(item => item.nombre === category && item.tipo === 'gasto')) throw new Error('Selecciona una categoría de gasto existente.');
+  let category = text(template.categoria, 'La categoría', 80, true);
+  if (!data.categorias.some(item => item.nombre === category && item.tipo === 'gasto')) {
+    // Assign default category if the specified category doesn't exist (e.g., during sync with stale data)
+    const defaultCategory = data.categorias.find(cat => cat.nombre === 'Otros' && cat.tipo === 'gasto') ?? data.categorias.find(cat => cat.tipo === 'gasto');
+    if (defaultCategory) {
+      category = defaultCategory.nombre;
+    } else {
+      throw new Error('No hay categorías de gasto disponibles. Configura al menos una categoría de gasto.');
+    }
+  }
   return { ...base, descripcion: text(template.descripcion, 'La descripción', 500, true), monto: number(template.monto, 'El monto'), categoria: category, tags: tags(template.tags), frecuencia: enumeration(template.frecuencia, ['semanal', 'quincenal', 'mensual', 'anual'], 'la frecuencia'), dia: number(template.dia, 'El día de pago', 1, 31, true), proximo_pago: validDate(template.proximo_pago), metodo_pago: enumeration(template.metodo_pago, methods, 'el método de pago') };
 }
 
