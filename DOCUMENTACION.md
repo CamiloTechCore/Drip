@@ -602,6 +602,9 @@ interface TeamWallet {
 - `public/logo.png` es ahora el botón central de `Agregar` en la navegación móvil y de escritorio. Dos accesos antes y tres después ocupan grupos laterales del mismo tamaño; el centro permanece fijo aunque los grupos tengan distinta cantidad de elementos. Se conservan las rutas, el formulario y la navegación por teclado.
 - Validación de esta corrección: `npm test` pasó con 109 pruebas y `npm run build` completó TypeScript, Vite y la generación PWA. Las nuevas pruebas cubren 11 pendientes ya guardados con cursor avanzado y categoría corregida, una edición realmente pendiente, cambios durante la lectura con desfase de reloj, categorías renombradas/inexistentes y borrados confirmados. Se verificó visualmente la navegación a 320, 390, 768 y 1440 px, incluido escritorio de 540 px de alto: logo centrado, enlaces visibles y apertura de `Agregar`. La conciliación usa respuestas simuladas; la limpieza en el dispositivo real requiere cargar esta versión y sincronizar.
 
+- Se refinó únicamente la navegación de escritorio (`fix: R0003`): barra lateral compacta de 88 px, accesos con separación uniforme alrededor del logo central de 84 px y marca en el encabezado. Las etiquetas aparecen junto a cada icono con una transición de opacidad y desplazamiento de 180 ms al pasar el cursor o enfocar con el teclado; no se recortan por el contenedor y respetan `prefers-reduced-motion`. La navegación móvil y las funcionalidades existentes se conservan.
+- Validación de la barra de escritorio: `npm run build` completó TypeScript, Vite y PWA. Se comprobó la aparición de etiquetas por cursor y teclado, las rutas y la apertura de `Agregar`, el centrado a 1440 × 900 y 1440 × 540, y la navegación móvil sin desbordamiento a 390 y 320 px. La comprobación visual utilizó únicamente datos de demostración locales.
+
 ### Limitaciones de Apps Script
 
 - Máximo 30 segundos de ejecución por request
