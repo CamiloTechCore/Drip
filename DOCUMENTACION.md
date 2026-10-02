@@ -596,6 +596,7 @@ interface TeamWallet {
 - La animación de burbujas se extendió a toda la altura del viewport: ahora ascienden de forma continua desde el footer hasta el header, con desfases negativos para mantener movimiento visible desde la primera carga y opacidad gradual para no competir con la interfaz.
 - Se corrigió la navegación móvil: una regla de apilamiento del fondo estaba convirtiendo accidentalmente la barra fija en contenido normal. Ahora permanece fija, respeta las safe areas y conserva espacio inferior para que no tape los controles.
 - El footer de autoría móvil se fijó explícitamente al flujo del documento, con espacio inferior para la navegación fija. Ahora aparece al llegar al final de todas las secciones, incluidas las pantallas cortas.
+- Se corrigió el alineamiento de escritorio a pantalla completa: la barra lateral y el logo ya parten desde el borde izquierdo real del navegador y no se superponen sobre títulos, tarjetas ni el footer.
 
 ### Limitaciones de Apps Script
 
