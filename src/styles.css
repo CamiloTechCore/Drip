@@ -114,13 +114,13 @@ svg {
   overflow: hidden;
   pointer-events: none;
   opacity: 1;
-  background: radial-gradient(ellipse at 30% 100%, #9d35ff9f, transparent 0%);
+  background: radial-gradient(ellipse at 30% 100%, #9d35ff3b, transparent 10%);
 }
 .bubble-background::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(to bottom, #f7f8fa18 0%, transparent 32%, transparent 72%, #f7f8fa2e 0%);
+  background: linear-gradient(to bottom, #6631f765 10%, transparent 32%, transparent 72%, #f7f8fa2e 0%);
 }
 .bubble-background span {
   position: absolute;
@@ -130,7 +130,7 @@ svg {
   height: var(--bubble-size);
   border-radius: 50%;
   opacity: 0;
-  background: radial-gradient(circle at 32% 25%, #fff9, #9e9aff33 42%, #6f68e808 74%);
+  background: radial-gradient(circle at 32% 25%, #fff9, #8d29ff8a 42%, #6f68e808 74%);
   border: 1px solid #aaa8f52e;
   box-shadow: inset -5px -7px 12px #756de813, 0 0 18px #a9a5ff16;
   animation: drip-bubble-rise var(--bubble-duration) var(--bubble-delay) ease-in-out infinite;
