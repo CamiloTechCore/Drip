@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clear, set } from 'idb-keyval';
-import { deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, syncAccount, type Account, type CacheState, type Operation } from './client';
+import { deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, selectUserData, syncAccount, type Account, type CacheState, type Operation } from './client';
 import { EMPTY_DATA } from '../lib/defaults';
 import type { Categoria, Recurrente, Registro } from '../types';
 
@@ -56,6 +56,79 @@ describe('durable offline cache', () => {
 });
 
 describe('synchronization', () => {
+  it('loads desktop writes on a separate mobile cache for the same user and excludes other owners', async () => {
+    const desktop = await connected();
+    const mobile: Account = { ...desktop, namespace: `${desktop.namespace}:separate-device` };
+    const userId = 'same-user';
+    const serverRows = new Map<string, Registro>([['other-user-record', row('other-user-record', { usuario_id: 'other-user' })]]);
+    let clock = Date.parse('2026-10-02T12:00:00.000Z');
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+      const payload = JSON.parse(String(options.body)) as { action: string; since?: string; operations?: Operation[] };
+      const serverTime = new Date(++clock).toISOString();
+      if (payload.action === 'batch') {
+        const registros = (payload.operations ?? []).flatMap(operation => {
+          if (operation.action !== 'upsert') return [];
+          const canonical = { ...operation.registro, actualizado_en: serverTime };
+          serverRows.set(canonical.id, canonical);
+          return [canonical];
+        });
+        return response({ registros, serverTime });
+      }
+      return response({ ...EMPTY_DATA, registros: [...serverRows.values()].filter(record => !payload.since || record.actualizado_en > payload.since), serverTime });
+    }));
+    await saveRegistro(desktop, row('desktop-write', { usuario_id: userId }));
+    await syncAccount(desktop);
+    await syncAccount(mobile, { full: true });
+    expect(selectUserData((await readCache(mobile)).data, userId).registros).toEqual([
+      expect.objectContaining({ id: 'desktop-write', monto: 6500, usuario_id: userId }),
+    ]);
+    await saveRegistro(desktop, row('desktop-write', { usuario_id: userId, monto: 11000 }));
+    await syncAccount(desktop);
+    await syncAccount(mobile);
+    expect(selectUserData((await readCache(mobile)).data, userId).registros[0].monto).toBe(11000);
+    expect(selectUserData((await readCache(mobile)).data, undefined).registros).toEqual([]);
+  });
+
+  it('recovers missing history and canonical ownership despite an advanced cursor and stale local clock', async () => {
+    const account = await connected();
+    const canonical = row('old-history', { usuario_id: 'same-user' });
+    const cache = await readCache(account);
+    await set(`drip:cache:v1:${account.namespace}`, { ...cache, cursor: '2026-10-02T15:00:00.000Z',
+      data: { ...cache.data, registros: [row('old-history', { actualizado_en: '2099-01-01T00:00:00.000Z' }), row('stale-only-local')] } });
+    const fetchMock = vi.fn(async (_url: string, options: RequestInit) => {
+      expect(JSON.parse(String(options.body))).toEqual({ action: 'list' });
+      return response({ ...EMPTY_DATA, registros: [canonical, row('missing-history', { usuario_id: 'same-user' })], serverTime: '2026-10-02T16:00:00.000Z' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await syncAccount(account, { full: true });
+    const state = await readCache(account);
+    expect(state.data.registros).toHaveLength(3);
+    expect(state.data.registros.find(record => record.id === canonical.id)).toEqual(canonical);
+    expect(state.data.registros.some(record => record.id === 'stale-only-local')).toBe(true);
+    expect(selectUserData(state.data, 'same-user').registros).toHaveLength(2);
+    expect(state.cursor).toBe('2026-10-02T16:00:00.000Z');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replace the cache or advance its cursor for a malformed full snapshot', async () => {
+    const account = await connected();
+    await saveRegistro(account, row('safe-pending'));
+    const before = await readCache(account);
+    vi.stubGlobal('fetch', vi.fn(async () => response({ categorias: [], serverTime: 'not-a-date' })));
+    await expect(syncAccount(account, { full: true })).rejects.toThrow('leer tus registros');
+    expect(await readCache(account)).toEqual(before);
+  });
+
+  it('preserves device-only history if the configured server returns an empty complete list', async () => {
+    const account = await connected();
+    const cache = await readCache(account);
+    const local = row('only-copy-on-device', { usuario_id: 'same-user' });
+    await set(`drip:cache:v1:${account.namespace}`, { ...cache, data: { ...cache.data, registros: [local] } });
+    vi.stubGlobal('fetch', vi.fn(async () => response({ ...EMPTY_DATA, serverTime: new Date().toISOString() })));
+    await syncAccount(account, { full: true });
+    expect((await readCache(account)).data.registros).toEqual([local]);
+  });
+
   it('reconciles eleven already-saved records despite an advanced cursor and a corrected category', async () => {
     const account = await connected();
     for (let index = 0; index < 11; index++) await saveRegistro(account, row(`saved-${index}`));

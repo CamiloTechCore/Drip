@@ -12,6 +12,7 @@ export function useData() {
   const queryClient = useQueryClient();
   const [account, setAccount] = useState<client.Account | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hydrating, setHydrating] = useState(false);
   useEffect(() => {
     let active = true;
     setAccount(null); setError(null);
@@ -25,12 +26,13 @@ export function useData() {
   const query = useQuery({ queryKey, queryFn: () => client.readCache(account!), enabled: !!account, staleTime: Infinity, retry: 1 });
   const mutation = useMutation({
     mutationKey: ['drip-sync', namespace],
-    mutationFn: async () => { if (account) await client.syncAccount(account); },
+    mutationFn: async (options: client.SyncOptions) => { if (account) await client.syncAccount(account, options); },
     onSuccess: () => { setError(null); },
     onError: (reason: Error) => { setError(reason.message); },
   });
   const syncing = useIsMutating({ mutationKey: ['drip-sync', namespace] }) > 0;
-  const sync = mutation.mutateAsync;
+  const mutateSync = mutation.mutateAsync;
+  const sync = useCallback(() => mutateSync({ full: true }), [mutateSync]);
 
   useEffect(() => client.subscribeCache(changed => {
     if (changed === namespace) void queryClient.invalidateQueries({ queryKey });
@@ -38,19 +40,30 @@ export function useData() {
 
   useEffect(() => {
     if (!account || account.settings.isDemo || !account.settings.url || !user) return;
+    let active = true;
     const run = () => { if (navigator.onLine) void sync().catch(() => undefined); };
-    run();
+    // Every login rehydrates the complete history, even with an old device cursor.
+    if (navigator.onLine) {
+      setHydrating(true);
+      void sync().catch(() => undefined).finally(() => { if (active) setHydrating(false); });
+    }
     window.addEventListener('online', run);
+    window.addEventListener('focus', run);
     const visible = () => { if (document.visibilityState === 'visible') run(); };
     document.addEventListener('visibilitychange', visible);
     // Reintenta periódicamente para que una cola pendiente no dependa de reabrir la app o recuperar la red.
-    const interval = setInterval(run, 60000);
+    const interval = setInterval(() => {
+      if (navigator.onLine && document.visibilityState === 'visible') void mutateSync({ full: false }).catch(() => undefined);
+    }, 60000);
     return () => {
+      active = false;
+      setHydrating(false);
       window.removeEventListener('online', run);
+      window.removeEventListener('focus', run);
       document.removeEventListener('visibilitychange', visible);
       clearInterval(interval);
     };
-  }, [account, sync, user?.id]);
+  }, [account, sync, mutateSync, user?.id]);
 
   const requireAccount = useCallback(() => {
     if (!account) throw new Error('El almacenamiento todavía se está abriendo. Inténtalo de nuevo.');
@@ -87,7 +100,7 @@ export function useData() {
   }, [query.data, user?.id, settings.isDemo]);
   return {
     data: filteredData,
-    loading: !account || query.isLoading,
+    loading: !account || query.isLoading || hydrating,
     pending: query.data?.queue.length ?? 0,
     pendingIds: ids,
     syncing,

@@ -11,6 +11,7 @@ export interface QueuedOperation { queueId: string; operation: Operation }
 export interface CacheState { version: 1; data: DataSet; queue: QueuedOperation[]; cursor: string | null }
 export interface Account { namespace: string; settings: Settings }
 export type ListResponse = DataSet & { serverTime: string };
+export interface SyncOptions { full?: boolean }
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string; message?: string };
 export const MISSING_CONNECTION_MESSAGE = 'Este despliegue no tiene una conexión configurada. Añade VITE_APPS_SCRIPT_URL en las variables de entorno de Vercel y vuelve a desplegar.';
 export class ApiError extends Error {
@@ -190,19 +191,23 @@ export async function loginUser(account: Account, input: { correo: string; passw
   return publicUser(await request<unknown>(account, { action: 'login', correo: validateEmail(input.correo), password: validateLoginPassword(input.password) }));
 }
 
-export async function syncAccount(account: Account): Promise<void> {
+export async function syncAccount(account: Account, options: SyncOptions = {}): Promise<void> {
   if (account.settings.isDemo) return;
   assertConnection(account);
-  return locked(`drip:sync:${account.namespace}`, () => syncUnlocked(account));
+  return locked(`drip:sync:${account.namespace}`, () => syncUnlocked(account, options));
 }
-async function syncUnlocked(account: Account): Promise<void> {
+async function syncUnlocked(account: Account, options: SyncOptions = {}): Promise<void> {
     // Read the canonical data first. Besides hydrating a new device, this gives
     // queued records the current category catalog before they are validated by
     // the server.
     const beforeSync = await readCache(account);
     // An incremental read can omit rows whose acknowledgement was lost long ago.
-    const initial = await request<ListResponse>(account, { action: 'list', ...(!beforeSync.queue.length && beforeSync.cursor ? { since: beforeSync.cursor } : {}) });
-    await changeCache(account, current => reconcilePending(current, beforeSync, initial));
+    const since = !options.full && !beforeSync.queue.length ? beforeSync.cursor : null;
+    const initial = await request<ListResponse>(account, { action: 'list', ...(since ? { since } : {}) });
+    if (!Array.isArray(initial?.registros) || !Array.isArray(initial.categorias) || !Number.isFinite(Date.parse(initial.serverTime))) {
+      throw new ApiError('INVALID_RESPONSE', 'No pudimos leer tus registros. Revisa que Apps Script esté actualizado y vuelve a sincronizar.');
+    }
+    await changeCache(account, current => reconcilePending(current, beforeSync, initial, !since));
 
     // Bound this pass; edits created while the request is in flight stay queued for the next pass.
     const snapshotIds = new Set(beforeSync.queue.map(item => item.queueId));
@@ -246,7 +251,7 @@ async function syncUnlocked(account: Account): Promise<void> {
 }
 
 /** Confirm lost acknowledgements by ID and version/content, never by ID alone. */
-function reconcilePending(current: CacheState, snapshot: CacheState, incoming: ListResponse): CacheState {
+function reconcilePending(current: CacheState, snapshot: CacheState, incoming: ListResponse, fullSnapshot: boolean): CacheState {
     const categories = incoming.categorias;
     const remote = new Map(incoming.registros.map(row => [row.id, row]));
     const snapshotIds = new Set(snapshot.queue.map(item => item.queueId));
@@ -301,7 +306,12 @@ function reconcilePending(current: CacheState, snapshot: CacheState, incoming: L
       return { ...item, operation: { action: 'upsert', registro } };
     });
     // Replace optimistic timestamps for confirmed records, then replay newer edits.
-    const base = { ...current.data, registros: current.data.registros.filter(row => !confirmed.has(row.id)) };
+    // A complete read repairs ownership/clock skew for the rows actually read.
+    // Never erase device-only history just because a server snapshot is empty.
+    // Pending edits still override canonical rows below, including deletions.
+    const canonicalIds = new Set(incoming.registros.map(row => row.id));
+    const base = { ...current.data, registros: current.data.registros.filter(row => fullSnapshot
+      ? !canonicalIds.has(row.id) : !confirmed.has(row.id)) };
     return { ...current, queue, cursor: incoming.serverTime, data: mergeListData(base, incoming, queue) };
 }
 

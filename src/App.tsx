@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { useData } from "./hooks/useData";
-import { useAuth } from "./store/auth";
+import { useAuth, watchSession } from "./store/auth";
 import { AppContext } from "./context";
 import { Brand } from "./components/ui";
 import BubbleBackground from "./components/BubbleBackground";
@@ -86,6 +86,15 @@ function DripApp() {
   const [sharing, setSharing] = useState(false);
   const [message, setMessage] = useState("");
   const [online, setOnline] = useState(navigator.onLine);
+  useEffect(() => watchSession(() => window.location.reload()), []);
+  useEffect(() => {
+    if (needsAuth) {
+      setCapture(null);
+      setSavingsCapture(null);
+      setSharing(false);
+      setMessage("");
+    }
+  }, [needsAuth]);
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
