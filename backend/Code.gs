@@ -1,7 +1,7 @@
 const SPREADSHEET_ID = '1Qzzvv2ObVMYdN9rQRSHYEwEdhlfKH262nM0trH4YBpY'; /*NO MODIFICAR*/
 const SHEET_NAME = 'Registros';
 const TIMEZONE = 'America/Bogota';
-const API_VERSION = 'Drip_API:V:0.0.0.06'; // V:0.0.0.04 nunca sembraba categorías: getLastRow() se inflaba por casillas en FALSE.
+const API_VERSION = 'Drip_API:V:0.0.0.07';
 
 /* Drip — Daily Records for Individuals & Partners.
  * Único archivo del backend. Publicar como Web App: ejecutar como Yo,
@@ -30,8 +30,13 @@ const NUMERIC_FIELDS_ = ['monto', 'presupuesto_mensual', 'monto_inicial', 'tasa_
 const BOOLEAN_FIELDS_ = ['activa', 'activo', 'eliminado', 'aprobado'];
 const DATE_FIELDS_ = ['fecha', 'fecha_inicio', 'proximo_pago'];
 var bookCache_;
+// Solo durante esta petición: nunca se reutilizan datos financieros entre sesiones.
+var tableCache_ = Object.create(null);
+var sheetCache_ = Object.create(null);
 
 function setup() {
+  tableCache_ = Object.create(null);
+  sheetCache_ = Object.create(null);
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -46,6 +51,8 @@ function setup() {
 function doGet(e) { return json_({ ok: true, service: 'finanzas', version: API_VERSION }); }
 
 function doPost(e) {
+  tableCache_ = Object.create(null);
+  sheetCache_ = Object.create(null);
   let lock;
   let acquired = false;
   try {
@@ -54,7 +61,7 @@ function doPost(e) {
     let p;
     try { p = JSON.parse(e.postData.contents); } catch (err) { throw apiError_('BAD_JSON', 'El cuerpo debe ser JSON válido.'); }
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw apiError_('BAD_REQUEST', 'La petición debe ser un objeto.');
-    const handlers = { list: handleList_, upsert: handleUpsert_, batch: handleBatch_, delete: handleDelete_, saveEntity: handleSaveEntity_, saveConfig: handleSaveConfig_, materializeRecurrentes: handleMaterialize_, register: handleRegister_, login: handleLogin_, createTeam: handleCreateTeam_, inviteToTeam: handleInviteToTeam_, createWish: handleCreateWish_, voteWish: handleVoteWish_, addComment: handleAddComment_, addToWallet: handleAddToWallet_, withdrawFromWallet: handleWithdrawFromWallet_ };
+    const handlers = { list: handleList_, sync: handleSync_, upsert: handleUpsert_, batch: handleBatch_, delete: handleDelete_, saveEntity: handleSaveEntity_, saveConfig: handleSaveConfig_, materializeRecurrentes: handleMaterialize_, register: handleRegister_, login: handleLogin_, createTeam: handleCreateTeam_, inviteToTeam: handleInviteToTeam_, createWish: handleCreateWish_, voteWish: handleVoteWish_, addComment: handleAddComment_, addToWallet: handleAddToWallet_, withdrawFromWallet: handleWithdrawFromWallet_ };
     if (!Object.prototype.hasOwnProperty.call(handlers, p.action)) throw apiError_('UNKNOWN_ACTION', 'Acción no reconocida.');
     // También bloqueamos las lecturas: esquema, semillas y cursor consistente
     // requieren escritura, y no se debe leer un batch parcialmente aplicado.
@@ -62,7 +69,12 @@ function doPost(e) {
     lock.waitLock(30000);
     acquired = true;
     ensureSchema_();
-    return ok_(handlers[p.action](p));
+    const result = handlers[p.action](p);
+    // Confirma la escritura y lee el estado resultante bajo el mismo bloqueo.
+    if (p.includeSnapshot === true && p.action !== 'list' && p.action !== 'sync' && p.action !== 'login' && p.action !== 'register') {
+      return ok_({ result: result, snapshot: handleList_({}) });
+    }
+    return ok_(result);
   } catch (err) {
     // No devolvemos stacks, IDs de la hoja ni errores internos de Google.
     return fail_(err.apiCode || 'SERVER_ERROR', err.apiCode ? err.message : 'No se pudo completar la operación. Reintenta en un momento.');
@@ -76,6 +88,7 @@ function ensureSchema_() {
     let sheet = book.getSheetByName(TABLE_NAMES_[key]);
     const headers = HEADERS_[key];
     if (!sheet) sheet = book.insertSheet(TABLE_NAMES_[key]);
+    sheetCache_[TABLE_NAMES_[key]] = sheet;
     if (sheet.getLastRow() === 0) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       created.push(key);
@@ -107,10 +120,14 @@ function ensureSchema_() {
       ['otros', 'Otros', 'gasto', '#64748b', 'CircleEllipsis']
     ].map(function (row) { return ['cat-' + row[0], row[1], row[2], row[3], row[4], 0, true]; });
     sheet_('Categorias').getRange(2, 1, seeds.length, HEADERS_.categorias.length).setValues(seeds);
+    delete tableCache_.categorias;
   }
   const existing = table_('config');
   const missing = Object.keys(DEFAULT_CONFIG_).filter(function (key) { return !existing.some(function (row) { return row.clave === key; }); });
-  if (missing.length) sheet_('Config').getRange(existing.length + 2, 1, missing.length, 2).setValues(missing.map(function (key) { return [key, DEFAULT_CONFIG_[key]]; }));
+  if (missing.length) {
+    sheet_('Config').getRange(existing.length + 2, 1, missing.length, 2).setValues(missing.map(function (key) { return [key, DEFAULT_CONFIG_[key]]; }));
+    delete tableCache_.config;
+  }
 }
 
 function formatSheet_(sheet, key) {
@@ -147,14 +164,19 @@ function handleList_(p) {
   const since = p.since ? iso_(p.since, 'since') : '';
   const votos = table_('votos');
   const comentarios = table_('comentarios');
+  const votesByWish = Object.create(null);
+  const commentsByWish = Object.create(null);
+  votos.forEach(function (vote) { (votesByWish[vote.deseo_id] || (votesByWish[vote.deseo_id] = [])).push(vote); });
+  comentarios.forEach(function (comment) { (commentsByWish[comment.deseo_id] || (commentsByWish[comment.deseo_id] = [])).push(comment); });
   return {
+    apiVersion: API_VERSION, syncProtocol: 1,
     registros: table_('registros').filter(function (row) { return !since || row.actualizado_en > since; }),
     categorias: table_('categorias'), deudas: table_('deudas'), recurrentes: table_('recurrentes'),
     config: config_(),
     // Estas colecciones son snapshots completos. since filtra solo Registros.
     // Sheets conserva miembros como JSON; la API lo expone siempre como arreglo.
     teams: table_('teams').map(publicTeam_),
-    deseos: table_('deseos').map(function (wish) { return Object.assign({}, wish, { votos: votos.filter(function (vote) { return vote.deseo_id === wish.id; }), comentarios: comentarios.filter(function (comment) { return comment.deseo_id === wish.id; }) }); }),
+    deseos: table_('deseos').map(function (wish) { return Object.assign({}, wish, { votos: votesByWish[wish.id] || [], comentarios: commentsByWish[wish.id] || [] }); }),
     votos: votos, comentarios: comentarios, team_wallets: table_('team_wallets'),
     serverTime: nowIso_()
   };
@@ -204,24 +226,36 @@ function handleCreateTeam_(p) {
     ensureTeamWallet_(existing);
     return publicTeam_(existing);
   }
+  // Resuelve todos los correos antes de crear el equipo: un correo inválido
+  // no deja un equipo parcial que el siguiente intento pudiera duplicar.
+  const invited = invitedUsers_(p.correos || []);
   const stamp = nowIso_();
-  const team = { id: id, nombre: nombre, creador_id: creator, miembros: JSON.stringify([creator]), creado_en: stamp, actualizado_en: stamp, activo: true };
+  const team = { id: id, nombre: nombre, creador_id: creator, miembros: JSON.stringify(Array.from(new Set([creator].concat(invited)))), creado_en: stamp, actualizado_en: stamp, activo: true };
   rows.push(team);
   writeChanges_('teams', rows, [rows.length - 1]);
   ensureTeamWallet_(team);
   return publicTeam_(team);
 }
+function invitedUsers_(value) {
+  const values = typeof value === 'string' ? value.split(',') : value;
+  if (!Array.isArray(values) || values.length > 50) throw apiError_('VALIDATION_ERROR', 'Escribe hasta 50 correos separados por comas.');
+  const emails = Array.from(new Set(values.map(email_)));
+  const users = table_('usuarios');
+  return emails.map(function (correo) {
+    const user = users.find(function (row) { return row.correo.toLocaleLowerCase() === correo; });
+    if (!user) throw apiError_('USER_NOT_FOUND', 'El correo ' + correo + ' no está registrado.');
+    return user.id;
+  });
+}
 function handleInviteToTeam_(p) {
   const userId = teamUser_(p.usuario_id);
   const team = memberTeam_(p.team_id, userId);
   if (team.creador_id !== userId) throw apiError_('UNAUTHORIZED', 'Solo el creador puede invitar miembros.');
-  const correo = email_(p.correo);
-  const invited = table_('usuarios').find(function (user) { return user.correo === correo; });
-  if (!invited) throw apiError_('USER_NOT_FOUND', 'El correo no está registrado.');
+  const invited = invitedUsers_(p.correos || p.correo);
   const members = teamMembers_(team);
-  if (members.indexOf(invited.id) < 0) {
-    members.push(invited.id);
-    team.miembros = JSON.stringify(members); team.actualizado_en = nowIso_();
+  const nextMembers = Array.from(new Set(members.concat(invited)));
+  if (nextMembers.length !== members.length) {
+    team.miembros = JSON.stringify(nextMembers); team.actualizado_en = nowIso_();
     const rows = table_('teams'); const index = rows.findIndex(function (row) { return row.id === team.id; });
     rows[index] = team; writeChanges_('teams', rows, [index]);
   }
@@ -315,6 +349,23 @@ function handleBatch_(p) {
   return applyOperations_(p.operations);
 }
 
+function handleSync_(p) {
+  if (!Array.isArray(p.operations) || p.operations.length > 250) throw apiError_('VALIDATION_ERROR', 'operations debe ser un arreglo de hasta 250 operaciones.');
+  const categories = table_('categorias');
+  const previous = Array.isArray(p.categorias) ? p.categorias : [];
+  const operations = p.operations.map(function (op) {
+    if (!op || op.action !== 'upsert' || !op.registro) return op;
+    const row = Object.assign({}, op.registro);
+    const tipo = row.tipo === 'ingreso' ? 'ingreso' : 'gasto';
+    const old = previous.find(function (category) { return category.nombre === row.categoria; });
+    const renamed = old && categories.find(function (category) { return category.id === old.id && category.tipo === tipo; });
+    if (renamed) row.categoria = renamed.nombre;
+    return { action: 'upsert', registro: row };
+  });
+  const result = applyOperations_(operations);
+  return Object.assign(result, { snapshot: handleList_({}) });
+}
+
 function applyOperations_(operations) {
   const rows = table_('registros');
   const original = Object.create(null);
@@ -342,7 +393,8 @@ function applyOperations_(operations) {
     if (previous && previous.eliminado && !clientStamp && op.action === 'upsert') { returned[id] = previous; return; }
     const stamp = nowIso_(clientStamp);
     if (op.action === 'delete') next = Object.assign({}, previous, { eliminado: true, actualizado_en: stamp });
-    else next = Object.assign(next, { creado_en: previous ? previous.creado_en : stamp, actualizado_en: stamp });
+    else next = Object.assign(next, { creado_en: previous ? previous.creado_en : stamp, actualizado_en: stamp,
+      usuario_id: previous && previous.usuario_id ? previous.usuario_id : next.usuario_id });
     const nextIndex = index === undefined ? rows.length : index;
     byId[id] = nextIndex;
     rows[nextIndex] = next;
@@ -484,6 +536,11 @@ function validate_(value, ctx) {
     if (row.monto !== 0) throw apiError_('VALIDATION_ERROR', 'sin_gasto requiere monto 0.');
     if (!row.categoria) row.categoria = ctx.categorias.find(function (c) { return c.nombre === 'Otros'; }) ? 'Otros' : ctx.categorias[0].nombre;
   }
+  // Clientes antiguos podían guardar "Deudas" tras renombrar esa categoría.
+  if ((row.tipo === 'deuda_pago' || row.tipo === 'deuda_aumento') && !ctx.categorias.some(function (c) { return c.nombre === row.categoria && c.tipo === 'gasto'; })) {
+    const debtCategory = ctx.categorias.find(function (c) { return c.id === 'cat-deudas' && c.tipo === 'gasto'; }) || ctx.categorias.find(function (c) { return c.tipo === 'gasto' && c.activa; });
+    if (debtCategory) row.categoria = debtCategory.nombre;
+  }
   const category = ctx.categorias.find(function (c) { return c.nombre === row.categoria; });
   if (!category) throw apiError_('VALIDATION_ERROR', 'La categoría no existe.');
   if ((row.tipo === 'ingreso' && category.tipo !== 'ingreso') || (row.tipo === 'gasto' && category.tipo !== 'gasto')) throw apiError_('VALIDATION_ERROR', 'El tipo de categoría no corresponde al movimiento.');
@@ -527,13 +584,14 @@ function book_() {
   if (!bookCache_) bookCache_ = SpreadsheetApp.openById(SPREADSHEET_ID);
   return bookCache_;
 }
-function sheet_(name) { const result = book_().getSheetByName(name); if (!result) throw apiError_('SCHEMA_MISMATCH', 'Falta una pestaña. Ejecuta setup().'); return result; }
+function sheet_(name) { const result = sheetCache_[name] || book_().getSheetByName(name); if (!result) throw apiError_('SCHEMA_MISMATCH', 'Falta una pestaña. Ejecuta setup().'); sheetCache_[name] = result; return result; }
 // Una celda con casilla (activa/eliminado) sin escribir vale FALSE en Sheets, no '';
 // sin esto, una fila nunca usada se confunde con una fila corrupta por tener datos.
 function isBlankRow_(row, headers) {
   return row.every(function (value, i) { return BOOLEAN_FIELDS_.indexOf(headers[i]) >= 0 ? (value === '' || value === false) : value === ''; });
 }
 function table_(key) {
+  if (tableCache_[key]) return JSON.parse(JSON.stringify(tableCache_[key]));
   const headers = HEADERS_[key];
   const rows = sheet_(TABLE_NAMES_[key]).getDataRange().getValues().slice(1);
   // No comprimir huecos: cambiaría los índices y podría sobrescribir otra fila.
@@ -550,7 +608,9 @@ function table_(key) {
     row[0] = 'blank-row-' + (i + 2);
     if (eliminadoIndex >= 0) row[eliminadoIndex] = true;
   }
-  return rows.map(function (row) { return rowToObj_(row, HEADERS_[key]); });
+  const result = rows.map(function (row) { return rowToObj_(row, HEADERS_[key]); });
+  tableCache_[key] = result;
+  return JSON.parse(JSON.stringify(result));
 }
 function rowToObj_(row, headers) {
   const result = {};
@@ -571,6 +631,7 @@ function objToRow_(obj, headers) { return headers.map(function (field) { const v
 // Agrupa filas contiguas; nunca llama setValue/getValue por celda.
 function writeChanges_(key, rows, indexes) {
   if (!indexes.length) return;
+  delete tableCache_[key];
   const unique = Array.from(new Set(indexes)).sort(function (a, b) { return a - b; });
   const sheet = sheet_(TABLE_NAMES_[key]);
   const needed = unique[unique.length - 1] + 2;

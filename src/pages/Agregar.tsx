@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Check, ChevronDown, Leaf, Repeat2, Trash2 } from "lucide-react";
 import { useDrip } from "../context";
 import { todayISO, addDays } from "../lib/analytics";
@@ -40,6 +40,9 @@ export default function Agregar({
     useState<Recurrente["frecuencia"]>("mensual");
   const [details, setDetails] = useState(Boolean(record));
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [draftId] = useState(() => record?.id ?? crypto.randomUUID());
+  const [templateId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const categories = useMemo(() => {
@@ -68,6 +71,7 @@ export default function Agregar({
   ];
   async function submit(e?: FormEvent, noSpend = false) {
     e?.preventDefault();
+    if (submitting.current) return;
     setError("");
     const value = Number(amount.replace(",", "."));
     if (!noSpend && (!Number.isFinite(value) || value <= 0)) {
@@ -85,11 +89,12 @@ export default function Agregar({
       return;
     }
     setBusy(true);
+    submitting.current = true;
     try {
       const now = new Date().toISOString();
       let recurrenteId = record?.recurrente_id ?? "";
       if (repeat && kind === "gasto" && !noSpend) {
-        recurrenteId = crypto.randomUUID();
+        recurrenteId = templateId;
         const next =
           frequency === "semanal"
             ? addDays(date, 7)
@@ -115,7 +120,7 @@ export default function Agregar({
         });
       }
       await saveRegistro({
-        id: record?.id ?? crypto.randomUUID(),
+        id: draftId,
         fecha: noSpend && !record ? todayISO() : date,
         tipo: noSpend
           ? "sin_gasto"
@@ -179,6 +184,7 @@ export default function Agregar({
           : "No se pudo guardar. Inténtalo de nuevo.",
       );
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }

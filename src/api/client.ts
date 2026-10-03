@@ -8,10 +8,10 @@ import type { Settings } from '../store/settings';
 
 export type Operation = { action: 'upsert'; registro: Registro } | { action: 'delete'; id: string; actualizado_en: string };
 export interface QueuedOperation { queueId: string; operation: Operation }
-export interface CacheState { version: 1; data: DataSet; queue: QueuedOperation[]; cursor: string | null }
+export interface CacheState { version: 1; data: DataSet; queue: QueuedOperation[]; cursor: string | null; syncProtocol?: number }
 export interface Account { namespace: string; settings: Settings }
-export type ListResponse = DataSet & { serverTime: string };
-export interface SyncOptions { full?: boolean }
+export type ListResponse = DataSet & { serverTime: string; apiVersion?: string; syncProtocol?: number };
+export interface SyncOptions { full?: boolean; pendingOnly?: boolean }
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string; message?: string };
 export const MISSING_CONNECTION_MESSAGE = 'Este despliegue no tiene una conexión configurada. Añade VITE_APPS_SCRIPT_URL en las variables de entorno de Vercel y vuelve a desplegar.';
 export class ApiError extends Error {
@@ -21,6 +21,7 @@ export class ApiError extends Error {
 }
 const listeners = new Set<(namespace: string) => void>();
 const serial = new Map<string, Promise<unknown>>();
+const fullSyncs = new Map<string, Promise<void>>();
 const LOCAL_INDEX = 'drip:unconfigured-stores:v1';
 const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('drip-cache-v1') : null;
 channel?.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -134,9 +135,10 @@ export async function request<T>(account: Account, payload: Record<string, unkno
   let lastError: Error = new Error('No fue posible conectar con Google Sheets.');
   let hadTransportFailure = false;
   const attempts = options.retry === false ? 1 : 3;
+  const deadline = Date.now() + 20_000;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45_000);
+    const timeout = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
     try {
       const response = await fetch(account.settings.url, {
         method: 'POST', redirect: 'follow', credentials: 'omit', signal: controller.signal,
@@ -163,7 +165,9 @@ export async function request<T>(account: Account, payload: Record<string, unkno
       lastError = error instanceof Error ? error : new Error('Error de conexión.');
       if (lastError instanceof ApiError) throw lastError;
       hadTransportFailure = true;
-      if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 600 * 2 ** attempt));
+      if (Date.now() >= deadline) break;
+      if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, Math.min(600 * 2 ** attempt, Math.max(0, deadline - Date.now()))));
+      if (Date.now() >= deadline) break;
     } finally { clearTimeout(timeout); }
   }
   throw new Error(lastError.name === 'AbortError' ? 'Google Sheets tardó demasiado. Tus cambios siguen guardados; vuelve a sincronizar.' : lastError.message);
@@ -194,26 +198,79 @@ export async function loginUser(account: Account, input: { correo: string; passw
 export async function syncAccount(account: Account, options: SyncOptions = {}): Promise<void> {
   if (account.settings.isDemo) return;
   assertConnection(account);
-  return locked(`drip:sync:${account.namespace}`, () => syncUnlocked(account, options));
+  // StrictMode and simultaneous manual refreshes share the same full read.
+  const existing = fullSyncs.get(account.namespace);
+  if (options.full && existing) return existing;
+  const pending = locked(`drip:sync:${account.namespace}`, () => syncUnlocked(account, options));
+  if (options.full) fullSyncs.set(account.namespace, pending);
+  try { await pending; } finally {
+    if (fullSyncs.get(account.namespace) === pending) fullSyncs.delete(account.namespace);
+  }
+}
+function validateSnapshot(value: ListResponse): void {
+  if (!Array.isArray(value?.registros) || !Array.isArray(value.categorias) || !Array.isArray(value.deudas)
+    || !Array.isArray(value.recurrentes) || !value.config || !Number.isFinite(Date.parse(value.serverTime))) {
+    throw new ApiError('INVALID_RESPONSE', 'No pudimos leer tus registros. Revisa que Apps Script esté actualizado y vuelve a sincronizar.');
+  }
+}
+
+async function writeAndRefresh<T>(account: Account, payload: Record<string, unknown>, options: { retry?: boolean } = {}): Promise<T> {
+  return locked(`drip:sync:${account.namespace}`, () => requestWithSnapshot<T>(account, payload, options));
+}
+async function requestWithSnapshot<T>(account: Account, payload: Record<string, unknown>, options: { retry?: boolean } = {}): Promise<T> {
+    const before = await readCache(account);
+    const response = await request<T | { result: T; snapshot: ListResponse }>(account, { ...payload, includeSnapshot: true }, options);
+    if (response && typeof response === 'object' && 'snapshot' in response && 'result' in response) {
+      validateSnapshot(response.snapshot);
+      await changeCache(account, current => reconcilePending(current, before, response.snapshot, true));
+      return response.result;
+    }
+    // Existing deployments remain usable until Code.gs is upgraded.
+    return response as T;
 }
 async function syncUnlocked(account: Account, options: SyncOptions = {}): Promise<void> {
     // Read the canonical data first. Besides hydrating a new device, this gives
     // queued records the current category catalog before they are validated by
     // the server.
     const beforeSync = await readCache(account);
+    if (options.pendingOnly && !beforeSync.queue.length) return;
+    const snapshotIds = new Set(beforeSync.queue.map(item => item.queueId));
     // An incremental read can omit rows whose acknowledgement was lost long ago.
-    const since = !options.full && !beforeSync.queue.length ? beforeSync.cursor : null;
-    const initial = await request<ListResponse>(account, { action: 'list', ...(since ? { since } : {}) });
-    if (!Array.isArray(initial?.registros) || !Array.isArray(initial.categorias) || !Number.isFinite(Date.parse(initial.serverTime))) {
-      throw new ApiError('INVALID_RESPONSE', 'No pudimos leer tus registros. Revisa que Apps Script esté actualizado y vuelve a sincronizar.');
+    if (options.full || beforeSync.syncProtocol !== 1 || !beforeSync.queue.length) {
+      const since = !options.full && !beforeSync.queue.length ? beforeSync.cursor : null;
+      const initial = await request<ListResponse>(account, { action: 'list', ...(since ? { since } : {}) });
+      validateSnapshot(initial);
+      await changeCache(account, current => {
+        const next = reconcilePending(current, beforeSync, initial, !since);
+        if (!since) {
+          const remoteIds = new Set(initial.registros.map(row => row.id));
+          const queuedIds = pendingIds(next);
+          // Older clients could lose the queue while keeping the only local copy.
+          // The shared API returns all owners and tombstones in a full snapshot:
+          // a missing, owned, live record needs uploading with its original ID.
+          for (const saved of beforeSync.data.registros) {
+            if (!saved.usuario_id || saved.eliminado || remoteIds.has(saved.id) || queuedIds.has(saved.id)) continue;
+            const local = next.data.registros.find(row => row.id === saved.id);
+            if (!local || local.eliminado) continue;
+            const oldCategory = beforeSync.data.categorias.find(category => category.nombre === local.categoria);
+            const renamed = initial.categorias.find(category => category.id === oldCategory?.id);
+            const registro = { ...local, categoria: renamed?.nombre ?? local.categoria, actualizado_en: new Date().toISOString() };
+            const queueId = crypto.randomUUID();
+            next.queue.push({ queueId, operation: { action: 'upsert', registro } });
+            queuedIds.add(saved.id); snapshotIds.add(queueId);
+          }
+          next.data = { ...next.data, registros: mergeRegistros(next.data.registros, [], next.queue) };
+        }
+        return next;
+      });
     }
-    await changeCache(account, current => reconcilePending(current, beforeSync, initial, !since));
 
     // Bound this pass; edits created while the request is in flight stay queued for the next pass.
-    const snapshotIds = new Set(beforeSync.queue.map(item => item.queueId));
     let sentBatch = false;
+    let receivedSnapshot = false;
     while (true) {
-      const eligible = (await readCache(account)).queue.filter(item => snapshotIds.has(item.queueId));
+      const cache = await readCache(account);
+      const eligible = cache.queue.filter(item => snapshotIds.has(item.queueId));
       if (!eligible.length) break;
       const latest = new Map<string, Operation>();
       eligible.forEach(item => latest.set(opId(item.operation), item.operation));
@@ -221,7 +278,14 @@ async function syncUnlocked(account: Account, options: SyncOptions = {}): Promis
       const recordIds = new Set(operations.map(opId));
       // Compact the entire snapshot before chunking, then acknowledge every older edit of those IDs.
       const sent = eligible.filter(item => recordIds.has(opId(item.operation)));
-      const result = await request<{ registros: Registro[]; serverTime: string }>(account, { action: 'batch', operations });
+      const result = await request<{ registros: Registro[]; serverTime: string; snapshot?: ListResponse }>(account,
+        cache.syncProtocol === 1
+          ? { action: 'sync', operations, categorias: cache.data.categorias.map(({ id, nombre }) => ({ id, nombre })) }
+          : { action: 'batch', operations });
+      if (!Array.isArray(result?.registros) || operations.some(op => op.action === 'upsert' && !result.registros.some(row => row.id === op.registro.id))) {
+        throw new ApiError('INVALID_RESPONSE', 'El servidor no confirmó los movimientos. Conservamos los cambios pendientes.');
+      }
+      if (result.snapshot) { validateSnapshot(result.snapshot); receivedSnapshot = true; }
       sentBatch = true;
       const sentIds = new Set(sent.map(item => item.queueId));
       await changeCache(account, current => {
@@ -241,10 +305,12 @@ async function syncUnlocked(account: Account, options: SyncOptions = {}): Promis
         const acknowledged = new Set(current.queue.filter(item => sentIds.has(item.queueId)).map(item => opId(item.operation)));
         const canonicalIds = new Set(result.registros.filter(row => acknowledged.has(row.id)).map(row => row.id));
         // Canonical acknowledgements replace optimistic timestamps, including clock skew.
-        return { ...current, queue, data: { ...current.data, registros: mergeRegistros(current.data.registros.filter(row => !canonicalIds.has(row.id)), result.registros, queue) } };
+        const next = { ...current, queue, data: { ...current.data, registros: mergeRegistros(current.data.registros.filter(row => !canonicalIds.has(row.id)), result.registros, queue) } };
+        // The snapshot and acknowledgement belong to the same server lock.
+        return result.snapshot ? reconcilePending(next, { ...next, queue: [] }, result.snapshot, true) : next;
       });
     }
-    if (!sentBatch) return;
+    if (!sentBatch || receivedSnapshot) return;
     const beforeList = await readCache(account);
     const result = await request<ListResponse>(account, { action: 'list', ...(beforeList.cursor ? { since: beforeList.cursor } : {}) });
     await changeCache(account, current => ({ ...current, cursor: result.serverTime, data: mergeListData(current.data, result, current.queue) }));
@@ -312,7 +378,7 @@ function reconcilePending(current: CacheState, snapshot: CacheState, incoming: L
     const canonicalIds = new Set(incoming.registros.map(row => row.id));
     const base = { ...current.data, registros: current.data.registros.filter(row => fullSnapshot
       ? !canonicalIds.has(row.id) : !confirmed.has(row.id)) };
-    return { ...current, queue, cursor: incoming.serverTime, data: mergeListData(base, incoming, queue) };
+    return { ...current, queue, cursor: incoming.serverTime, syncProtocol: incoming.syncProtocol, data: mergeListData(base, incoming, queue) };
 }
 
 function members(value: unknown, fallback: string[] = []): string[] {
@@ -320,12 +386,12 @@ function members(value: unknown, fallback: string[] = []): string[] {
   if (typeof parsed === 'string') {
     try { parsed = JSON.parse(parsed) as unknown; } catch { return fallback; }
   }
-  return Array.isArray(parsed) ? [...new Set(parsed.filter((member): member is string => typeof member === 'string' && member.length > 0))] : fallback;
+  return Array.isArray(parsed) ? [...new Set(parsed.filter((member): member is string => typeof member === 'string' && member.trim().length > 0).map(member => member.trim()))] : fallback;
 }
 export function normalizeTeam(team: Team, previous?: Team): Team {
   return {
     ...previous, ...team,
-    miembros: members(team.miembros, previous?.miembros ?? (team.creador_id ? [team.creador_id] : [])),
+    miembros: [...new Set([...(team.creador_id ? [team.creador_id] : []), ...members(team.miembros, previous?.miembros ?? [])])],
     creado_en: team.creado_en ?? previous?.creado_en ?? '',
     actualizado_en: team.actualizado_en ?? previous?.actualizado_en ?? '',
     activo: typeof team.activo === 'boolean' ? team.activo : team.activo === undefined ? previous?.activo ?? true : String(team.activo).toLowerCase() === 'true',
@@ -413,18 +479,18 @@ export async function saveEntity(account: Account, entity: EntityName, data: Ent
   await locked(`drip:sync:${account.namespace}`, async () => {
     const current = await readCache(account);
     const valid = validateEntity(entity, data, current.data);
-    const canonical = await request<Entity>(account, { action: 'saveEntity', entity, data: valid });
+    const canonical = await requestWithSnapshot<Entity>(account, { action: 'saveEntity', entity, data: valid });
     await changeCache(account, state => applyEntity(state, entity, canonical));
-    await syncUnlocked(account);
+    if ((await readCache(account)).syncProtocol !== 1) await syncUnlocked(account);
   });
 }
 export async function saveConfig(account: Account, config: Config): Promise<void> {
   const valid = validateConfig(config);
   if (account.settings.isDemo) { await changeCache(account, state => ({ ...state, data: { ...state.data, config: valid } })); return; }
   await locked(`drip:sync:${account.namespace}`, async () => {
-    const canonical = await request<Config>(account, { action: 'saveConfig', config: valid });
+    const canonical = await requestWithSnapshot<Config>(account, { action: 'saveConfig', config: valid });
     await changeCache(account, state => ({ ...state, data: { ...state.data, config: canonical } }));
-    await syncUnlocked(account);
+    if ((await readCache(account)).syncProtocol !== 1) await syncUnlocked(account);
   });
 }
 function nextRecurringDate(date: string, template: Recurrente): string {
@@ -510,17 +576,29 @@ async function cacheTeam(account: Account, value: Team): Promise<Team> {
   });
   return team;
 }
-export async function createTeam(account: Account, nombre: string, usuario_id: string): Promise<Team> {
-  const result = await request<Team>(account, { action: 'createTeam', id: crypto.randomUUID(), nombre, usuario_id });
+export function parseInviteEmails(value: string): string[] {
+  if (!value.trim()) return [];
+  const emails = [...new Set(value.split(',').map(email => validateEmail(email.trim())))];
+  if (emails.length > 50) throw new Error('Puedes invitar hasta 50 correos a la vez.');
+  return emails;
+}
+export async function createTeam(account: Account, nombre: string, usuario_id: string, correos = '', id: string = crypto.randomUUID()): Promise<Team> {
+  const emails = parseInviteEmails(correos);
+  // Older implementations ignore unknown fields, so never silently drop invitations.
+  if (emails.length && (await readCache(account)).syncProtocol !== 1) {
+    throw new Error('Actualiza Code.gs a Drip_API:V:0.0.0.07 y pulsa Actualizar antes de invitar varios correos.');
+  }
+  const result = await writeAndRefresh<Team>(account, { action: 'createTeam', id, nombre: validateName(nombre), usuario_id, correos: emails });
   return cacheTeam(account, result);
 }
 
 export async function inviteToTeam(account: Account, team_id: string, correo: string, usuario_id: string): Promise<Team> {
-  return cacheTeam(account, await request<Team>(account, { action: 'inviteToTeam', team_id, correo, usuario_id }));
+  const emails = parseInviteEmails(correo);
+  return cacheTeam(account, await writeAndRefresh<Team>(account, { action: 'inviteToTeam', team_id, correo: emails.join(','), usuario_id }));
 }
 
-export async function createWish(account: Account, team_id: string, titulo: string, descripcion: string, monto_objetivo: number, usuario_id: string): Promise<Deseo> {
-  const result = await request<Deseo>(account, { action: 'createWish', id: crypto.randomUUID(), team_id, titulo, descripcion, monto_objetivo, usuario_id });
+export async function createWish(account: Account, team_id: string, titulo: string, descripcion: string, monto_objetivo: number, usuario_id: string, id: string = crypto.randomUUID()): Promise<Deseo> {
+  const result = await writeAndRefresh<Deseo>(account, { action: 'createWish', id, team_id, titulo, descripcion, monto_objetivo, usuario_id });
   let wish = result;
   await changeCache(account, state => {
     wish = hydrateWish(result, state.data.votos, state.data.comentarios, state.data.deseos?.find(existing => existing.id === result.id));
@@ -530,13 +608,13 @@ export async function createWish(account: Account, team_id: string, titulo: stri
 }
 
 export async function voteWish(account: Account, deseo_id: string, tipo: 'like' | 'dislike' | 'revision', usuario_id: string): Promise<{ deseo_id: string; tipo: string; aprobado: boolean }> {
-  const result = await request<{ deseo_id: string; tipo: string; aprobado: boolean }>(account, { action: 'voteWish', deseo_id, tipo, usuario_id });
+  const result = await writeAndRefresh<{ deseo_id: string; tipo: string; aprobado: boolean }>(account, { action: 'voteWish', deseo_id, tipo, usuario_id });
   await changeCache(account, state => ({ ...state, data: { ...state.data, deseos: state.data.deseos?.map(wish => wish.id === result.deseo_id ? { ...wish, aprobado: result.aprobado } : wish) } }));
   return result;
 }
 
 export async function addComment(account: Account, deseo_id: string, texto: string, usuario_id: string): Promise<Comentario> {
-  const result = await request<Comentario>(account, { action: 'addComment', id: crypto.randomUUID(), deseo_id, texto, usuario_id });
+  const result = await writeAndRefresh<Comentario>(account, { action: 'addComment', id: crypto.randomUUID(), deseo_id, texto, usuario_id });
   const comment = { ...result, deseo_id: result.deseo_id ?? deseo_id };
   await changeCache(account, state => ({ ...state, data: {
     ...state.data, comentarios: upsertItem(state.data.comentarios, comment),
@@ -553,11 +631,11 @@ async function cacheWallet(account: Account, value: { team_id: string; saldo: nu
   });
 }
 export async function addToWallet(account: Account, team_id: string, monto: number, usuario_id: string): Promise<{ team_id: string; saldo: number }> {
-  const result = await request<{ team_id: string; saldo: number }>(account, { action: 'addToWallet', team_id, monto, usuario_id }, { retry: false });
+  const result = await writeAndRefresh<{ team_id: string; saldo: number }>(account, { action: 'addToWallet', team_id, monto, usuario_id }, { retry: false });
   await cacheWallet(account, result); return result;
 }
 
 export async function withdrawFromWallet(account: Account, team_id: string, monto: number, usuario_id: string): Promise<{ team_id: string; saldo: number }> {
-  const result = await request<{ team_id: string; saldo: number }>(account, { action: 'withdrawFromWallet', team_id, monto, usuario_id }, { retry: false });
+  const result = await writeAndRefresh<{ team_id: string; saldo: number }>(account, { action: 'withdrawFromWallet', team_id, monto, usuario_id }, { retry: false });
   await cacheWallet(account, result); return result;
 }

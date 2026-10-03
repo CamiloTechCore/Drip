@@ -25,7 +25,6 @@
 * {
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
   min-width: 0;
@@ -115,13 +114,13 @@ svg {
   overflow: hidden;
   pointer-events: none;
   opacity: 1;
-  background: radial-gradient(ellipse at 30% 100%, #9d35ff3b, transparent 10%);
+  background: radial-gradient(ellipse at 30% 100%, #aa91ff22, transparent 65%);
 }
 .bubble-background::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(to bottom, #6631f765 10%, transparent 32%, transparent 72%, #f7f8fa2e 0%);
+  background: linear-gradient(to bottom, #6e21e970 0%, transparent 32%, transparent 72%, #f7f8fa2e 0%);
 }
 .bubble-background span {
   position: absolute;
@@ -131,9 +130,9 @@ svg {
   height: var(--bubble-size);
   border-radius: 50%;
   opacity: 0;
-  background: radial-gradient(circle at 32% 25%, #fff9, #8d29ff8a 42%, #6f68e808 74%);
-  border: 1px solid #aaa8f52e;
-  box-shadow: inset -5px -7px 12px #756de813, 0 0 18px #a9a5ff16;
+  background: radial-gradient(circle at 32% 25%, #ffffffb8, #9e9aff85 42%, #6f68e830 74%);
+  border: 1px solid #8075da80;
+  box-shadow: inset -5px -7px 12px #756de830, 0 0 18px #a9a5ff30;
   animation: drip-bubble-rise var(--bubble-duration) var(--bubble-delay) ease-in-out infinite;
 }
 .bubble-background span:nth-child(1){--bubble-left:7%;--bubble-size:18px;--bubble-duration:18s;--bubble-delay:-1s}
@@ -150,14 +149,24 @@ svg {
 .bubble-background span:nth-child(12){--bubble-left:39%;--bubble-size:16px;--bubble-duration:19s;--bubble-delay:-15s}
 .bubble-background span:nth-child(13){--bubble-left:69%;--bubble-size:22px;--bubble-duration:21s;--bubble-delay:-7s}
 .bubble-background span:nth-child(14){--bubble-left:86%;--bubble-size:13px;--bubble-duration:18s;--bubble-delay:-14s}
+.bubble-background span:nth-child(15){--bubble-left:3%;--bubble-size:56px;--bubble-duration:22s;--bubble-delay:-8s}
+.bubble-background span:nth-child(16){--bubble-left:20%;--bubble-size:9px;--bubble-duration:23s;--bubble-delay:-10s}
+.bubble-background span:nth-child(17){--bubble-left:31%;--bubble-size:66px;--bubble-duration:24s;--bubble-delay:-12s}
+.bubble-background span:nth-child(18){--bubble-left:48%;--bubble-size:30px;--bubble-duration:25s;--bubble-delay:-14s}
+.bubble-background span:nth-child(19){--bubble-left:58%;--bubble-size:48px;--bubble-duration:26s;--bubble-delay:-16s}
+.bubble-background span:nth-child(20){--bubble-left:76%;--bubble-size:72px;--bubble-duration:27s;--bubble-delay:-18s}
+.bubble-background span:nth-child(21){--bubble-left:94%;--bubble-size:54px;--bubble-duration:28s;--bubble-delay:-20s}
+.bubble-background span:nth-child(22){--bubble-left:9%;--bubble-size:40px;--bubble-duration:29s;--bubble-delay:-22s}
+.bubble-background span:nth-child(23){--bubble-left:66%;--bubble-size:12px;--bubble-duration:30s;--bubble-delay:-24s}
+.bubble-background span:nth-child(24){--bubble-left:88%;--bubble-size:26px;--bubble-duration:31s;--bubble-delay:-26s}
 @keyframes drip-bubble-rise {
   0% { transform: translate3d(0, 0, 0) scale(.7); opacity: 0; }
-  10% { opacity: .58; }
-  46% { opacity: .38; }
-  72% { opacity: .16; transform: translate3d(22px, -72vh, 0) scale(1.15); }
+  10% { opacity: .8; }
+  46% { opacity: .65; }
+  72% { opacity: .45; transform: translate3d(22px, -72vh, 0) scale(1.15); }
   100% { opacity: 0; transform: translate3d(-18px, -112vh, 0) scale(1.28); }
 }
-.app-shell > :not(.bubble-background):not(.bottom-nav):not(.app-footer) { position: relative; z-index: 1; }
+.app-shell > :is(.app-header, main, .demo-banner, .update-banner, .sync-error) { position: relative; z-index: 1; }
 .app-footer {
   display: flex;
   align-items: center;
@@ -179,7 +188,7 @@ svg {
 }
 .app-footer a:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
-  .bubble-background span { animation: none; opacity: .14; transform: translateY(-18vh); }
+  .bubble-background span { animation: none; opacity: .55; bottom: calc(var(--bubble-left) * .85); transform: none; }
 }
 .app-header {
   display: flex;
@@ -885,6 +894,7 @@ svg {
   width: max-content;
   max-width: calc(100% - 38px);
 }
+body:has(.modal-root) .app-footer { visibility: hidden; }
 .sheet-overlay {
   position: fixed;
   inset: 0;

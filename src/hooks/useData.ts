@@ -41,27 +41,22 @@ export function useData() {
   useEffect(() => {
     if (!account || account.settings.isDemo || !account.settings.url || !user) return;
     let active = true;
-    const run = () => { if (navigator.onLine) void sync().catch(() => undefined); };
+    const run = () => {
+      // Recover offline writes only. Returning to a tab must not poll Sheets.
+      void client.readCache(account).then(state => {
+        if (active && navigator.onLine && state.queue.length) return mutateSync({ pendingOnly: true });
+      }).catch(() => undefined);
+    };
     // Every login rehydrates the complete history, even with an old device cursor.
     if (navigator.onLine) {
       setHydrating(true);
       void sync().catch(() => undefined).finally(() => { if (active) setHydrating(false); });
     }
     window.addEventListener('online', run);
-    window.addEventListener('focus', run);
-    const visible = () => { if (document.visibilityState === 'visible') run(); };
-    document.addEventListener('visibilitychange', visible);
-    // Reintenta periódicamente para que una cola pendiente no dependa de reabrir la app o recuperar la red.
-    const interval = setInterval(() => {
-      if (navigator.onLine && document.visibilityState === 'visible') void mutateSync({ full: false }).catch(() => undefined);
-    }, 60000);
     return () => {
       active = false;
       setHydrating(false);
       window.removeEventListener('online', run);
-      window.removeEventListener('focus', run);
-      document.removeEventListener('visibilitychange', visible);
-      clearInterval(interval);
     };
   }, [account, sync, mutateSync, user?.id]);
 
@@ -71,8 +66,8 @@ export function useData() {
   }, [account]);
   const afterLocalWrite = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey });
-    if (account && !account.settings.isDemo && account.settings.url && user && navigator.onLine) void sync().catch(() => undefined);
-  }, [account, queryClient, queryKey, sync, user?.id]);
+    if (account && !account.settings.isDemo && account.settings.url && user && navigator.onLine) void mutateSync({ pendingOnly: true }).catch(() => undefined);
+  }, [account, queryClient, queryKey, mutateSync, user?.id]);
   const saveRegistro = useCallback(async (registro: Registro) => {
     // Conserva quién lo creó originalmente; solo atribuye registros nuevos sin usuario_id.
     const owned = registro.usuario_id ? registro : { ...registro, usuario_id: user?.id ?? '' };
@@ -101,6 +96,7 @@ export function useData() {
   return {
     data: filteredData,
     loading: !account || query.isLoading || hydrating,
+    unavailable: !settings.isDemo && !!user && !query.data?.cursor && !query.data?.data.registros.length,
     pending: query.data?.queue.length ?? 0,
     pendingIds: ids,
     syncing,

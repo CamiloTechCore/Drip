@@ -119,14 +119,21 @@ describe('synchronization', () => {
     expect(await readCache(account)).toEqual(before);
   });
 
-  it('preserves device-only history if the configured server returns an empty complete list', async () => {
+  it('recovers owned device-only history whose pending queue was lost and uploads it with the original ID', async () => {
     const account = await connected();
     const cache = await readCache(account);
     const local = row('only-copy-on-device', { usuario_id: 'same-user' });
     await set(`drip:cache:v1:${account.namespace}`, { ...cache, data: { ...cache.data, registros: [local] } });
-    vi.stubGlobal('fetch', vi.fn(async () => response({ ...EMPTY_DATA, serverTime: new Date().toISOString() })));
+    const remote: Registro[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+      const payload = JSON.parse(String(options.body));
+      if (payload.action === 'batch') remote.push(payload.operations[0].registro);
+      return response({ ...EMPTY_DATA, registros: remote, serverTime: new Date().toISOString() });
+    }));
     await syncAccount(account, { full: true });
-    expect((await readCache(account)).data.registros).toEqual([local]);
+    expect((await readCache(account)).data.registros).toEqual([expect.objectContaining({ id: local.id, usuario_id: 'same-user', monto: local.monto })]);
+    expect(remote).toHaveLength(1);
+    expect((await readCache(account)).queue).toEqual([]);
   });
 
   it('reconciles eleven already-saved records despite an advanced cursor and a corrected category', async () => {

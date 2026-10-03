@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useDrip } from "../context";
 import { todayISO } from "../lib/analytics";
 import { Sheet, categoryIcons } from "./ui";
@@ -22,19 +22,23 @@ export default function EntityEditor({
   const { data, saveEntity, toast } = useDrip();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [draftId] = useState(() => value?.id ?? crypto.randomUUID());
   const category = value as Categoria | undefined;
   const debt = value as Deuda | undefined;
   const recurring = value as Recurrente | undefined;
   const [color, setColor] = useState(category?.color ?? "#615BEA");
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     const f = new FormData(e.currentTarget);
     const str = (k: string) => String(f.get(k) ?? "").trim();
     const num = (k: string) => Number(f.get(k) || 0);
     const base = {
-      id: value?.id ?? crypto.randomUUID(),
+      id: draftId,
       activa: f.get("activa") === "on",
     };
     let result: Entity;
@@ -77,13 +81,14 @@ export default function EntityEditor({
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo guardar");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
   return (
     <Sheet
       title={`${value ? "Editar" : "Crear"} ${entity === "categoria" ? "categoría" : entity === "deuda" ? "deuda" : "pago recurrente"}`}
-      onClose={onClose}
+      onClose={() => { if (!submitting.current) onClose(); }}
     >
       <form className="form-stack entity-form" onSubmit={submit}>
         {entity === "categoria" ? (

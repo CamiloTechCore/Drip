@@ -474,11 +474,11 @@ interface TeamWallet {
    ```
 
 3. **Sincronización Automática:**
-   - Al abrir la app
-   - Al recuperar conexión
-   - Al volver al primer plano
-   - Cada 60 segundos
-   - Manual: botón "Sincronizar ahora"
+   - Historial completo al iniciar sesión
+   - Al guardar, editar o eliminar un movimiento
+   - Al recuperar conexión, únicamente si existen operaciones pendientes
+   - Manual: botones "Sincronizar ahora" y "Actualizar"
+   - Sin temporizadores ni consultas por foco o cambio de visibilidad
 
 4. **Resolución de Conflictos:**
    - Cada operación tiene UUID idempotente
@@ -580,7 +580,7 @@ interface TeamWallet {
 
 ---
 
-## 📝 Notas Importantes  
+## 📝 Notas Importantes 
 
 ### Cambios validados — 2026-10-02
 

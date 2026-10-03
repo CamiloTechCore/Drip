@@ -8,7 +8,7 @@
   box-shadow: none;
 }
 
-.app-shell:not(.app-shell--auth)
+:is(.app-shell:not(.app-shell--auth), .modal-root)
   :is(
     main,
     .page,
@@ -39,7 +39,7 @@
   min-width: 0;
 }
 
-.app-shell:not(.app-shell--auth)
+:is(.app-shell:not(.app-shell--auth), .modal-root)
   :is(
     .footnote,
     .note,
@@ -53,7 +53,7 @@
   overflow-wrap: anywhere;
 }
 
-.app-shell:not(.app-shell--auth)
+:is(.app-shell:not(.app-shell--auth), .modal-root)
   :is(
     .section-title,
     .chart-header,
@@ -84,7 +84,7 @@
   overflow-wrap: anywhere;
 }
 
-.app-shell:not(.app-shell--auth)
+:is(.app-shell:not(.app-shell--auth), .modal-root)
   :is(.button, .text-button, .segmented button, .period-select button) {
   min-width: 0;
   white-space: normal;
@@ -173,11 +173,11 @@
   min-width: 0;
 }
 
-.app-shell:not(.app-shell--auth) .sheet-overlay {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-overlay {
   padding-top: max(12px, env(safe-area-inset-top));
 }
 
-.app-shell:not(.app-shell--auth) .sheet {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .sheet {
   width: 100%;
   max-width: 480px;
   min-width: 0;
@@ -188,25 +188,25 @@
   scrollbar-gutter: stable;
 }
 
-.app-shell:not(.app-shell--auth) .sheet-heading {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-heading {
   gap: 12px;
 }
 
-.app-shell:not(.app-shell--auth) .sheet-heading h2 {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-heading h2 {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.app-shell:not(.app-shell--auth) .amount-input input {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .amount-input input {
   min-width: 0;
   font-size: clamp(2.5rem, 9vw, 3.7rem);
 }
 
-.app-shell:not(.app-shell--auth) .necessity {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .necessity {
   flex-wrap: wrap;
 }
 
-.app-shell:not(.app-shell--auth) .necessity > div {
+:is(.app-shell:not(.app-shell--auth), .modal-root) .necessity > div {
   min-width: 0;
   flex-wrap: wrap;
 }
@@ -257,15 +257,15 @@
     border-width: 4px;
   }
 
-  .app-shell:not(.app-shell--auth) .sheet {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet {
     padding-inline: 16px;
   }
 
-  .app-shell:not(.app-shell--auth) .category-grid {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .category-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .app-shell:not(.app-shell--auth) .form-two {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .form-two {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -314,7 +314,7 @@
     padding: 10px 20px 12px;
   }
 
-  .app-shell:not(.app-shell--auth) .sheet-overlay {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-overlay {
     align-items: center;
     padding: max(24px, env(safe-area-inset-top))
       max(24px, env(safe-area-inset-right))
@@ -322,14 +322,14 @@
       max(24px, env(safe-area-inset-left));
   }
 
-  .app-shell:not(.app-shell--auth) .sheet {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet {
     max-height: calc(100dvh - 48px);
     border-radius: 26px;
     padding: 0 28px 26px;
     box-shadow: 0 24px 100px #1e20433b;
   }
 
-  .app-shell:not(.app-shell--auth) .sheet-handle {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-handle {
     height: 28px;
   }
 
@@ -427,7 +427,7 @@
     padding: 16px;
   }
 
-  .app-shell:not(.app-shell--auth)
+  :is(.app-shell:not(.app-shell--auth), .modal-root)
     :is(.home-page, .analysis-page, .more-page)
     > :is(
       .page-intro,
@@ -473,7 +473,7 @@
     font-size: 1.6rem;
   }
 
-  .app-shell:not(.app-shell--auth)
+  :is(.app-shell:not(.app-shell--auth), .modal-root)
     :is(.home-page, .analysis-page, .more-page)
     > .button {
     grid-column: 1 / -1;
@@ -508,7 +508,7 @@
     margin-inline: auto;
   }
 
-  .app-shell:not(.app-shell--auth) .filter-card .form-two {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .filter-card .form-two {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -809,23 +809,23 @@
 /* Keep forms and navigation usable in short landscape viewports, including
    phones with a notch. Sheets scroll independently instead of leaving the screen. */
 @media (max-height: 540px) and (orientation: landscape) {
-  .app-shell:not(.app-shell--auth) .sheet-overlay {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-overlay {
     padding: 10px max(16px, env(safe-area-inset-right)) 10px
       max(16px, env(safe-area-inset-left));
     align-items: center;
   }
 
-  .app-shell:not(.app-shell--auth) .sheet {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet {
     max-height: calc(100dvh - 20px);
     border-radius: 20px;
     padding-bottom: 20px;
   }
 
-  .app-shell:not(.app-shell--auth) .sheet-handle {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-handle {
     height: 18px;
   }
 
-  .app-shell:not(.app-shell--auth) .sheet-heading {
+  :is(.app-shell:not(.app-shell--auth), .modal-root) .sheet-heading {
     margin-bottom: 10px;
   }
 

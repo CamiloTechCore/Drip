@@ -1,16 +1,20 @@
-import { useState, useMemo, useEffect, type FormEvent } from "react";
-import { Star, Plus, Users, Wallet, ThumbsUp, ThumbsDown, Clock, MessageSquare, Check, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useMemo, useEffect, useRef, type FormEvent } from "react";
+import { Star, Plus, Users, Wallet, ThumbsUp, ThumbsDown, Clock, MessageSquare, Check, Trash2, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { useDrip } from "../context";
 import { Card, Empty } from "../components/ui";
 import { useAuth } from "../store/auth";
 import { useSettings } from "../store/settings";
 import * as client from "../api/client";
-import type { Team, Deseo, VotoTipo, TeamWallet } from "../types";
+import type { Team, Deseo, VotoTipo } from "../types";
 
 export default function Wishes() {
   const { user } = useAuth();
   const settings = useSettings();
-  const { toast } = useDrip();
+  const { toast, data, sync, syncing } = useDrip();
+  const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const teamDraftId = useRef(crypto.randomUUID());
+  const wishDraftId = useRef(crypto.randomUUID());
   const [view, setView] = useState<'teams' | 'create-team' | 'team-detail' | 'create-wish'>('teams');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [expandedWish, setExpandedWish] = useState<string | null>(null);
@@ -24,50 +28,10 @@ export default function Wishes() {
     }
   }, [settings.url, settings.isDemo, toast]);
 
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [loadingTeams, setLoadingTeams] = useState(false);
-  const [deseos, setDeseos] = useState<Deseo[]>([]);
-  const [wallet, setWallet] = useState<TeamWallet | null>(null);
-
-  const loadDeseos = async (teamId: string) => {
-    if (settings.isDemo || !account) return;
-    try {
-      const response = await client.request<{ deseos?: Deseo[]; team_wallets?: TeamWallet[] }>(account, { action: 'list' });
-      if (response.deseos) {
-        const teamDeseos = response.deseos.filter((d: Deseo) => d.team_id === teamId);
-        setDeseos(teamDeseos);
-      }
-      if (response.team_wallets) {
-        const teamWallet = response.team_wallets.find((w) => w.team_id === teamId);
-        setWallet(teamWallet || null);
-      }
-    } catch (error) {
-      console.error('Error loading deseos:', error);
-    }
-  };
-
-  const loadTeams = async () => {
-    if (settings.isDemo || !account) return;
-    setLoadingTeams(true);
-    try {
-      const response = await client.request<{ teams?: Team[] }>(account, { action: 'list' });
-      if (response.teams) setTeams(response.teams);
-    } catch (error) {
-      console.error('Error loading teams:', error);
-    } finally {
-      setLoadingTeams(false);
-    }
-  };
-
-  useEffect(() => {
-    loadTeams();
-  }, [account, settings.isDemo]);
-
-  useEffect(() => {
-    if (selectedTeam && !settings.isDemo) {
-      loadDeseos(selectedTeam.id);
-    }
-  }, [selectedTeam, settings.isDemo]);
+  // Every page reads the same normalized, account-filtered snapshot.
+  const teams = (data.teams ?? []).filter(team => team.activo);
+  const deseos = (data.deseos ?? []).filter(wish => !wish.eliminado);
+  const wallet = data.team_wallets?.find(value => value.team_id === selectedTeam?.id) ?? null;
 
   // Datos demo para modo demo
   const demoDeseos = useMemo(() => {
@@ -141,17 +105,17 @@ export default function Wishes() {
     const nombre = (form.elements.namedItem('team-name') as HTMLInputElement).value;
     const correo = (form.elements.namedItem('invite-email') as HTMLInputElement).value;
 
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true);
     try {
-      const team = await client.createTeam(account, nombre, user.id);
-      if (correo) {
-        await client.inviteToTeam(account, team.id, correo, user.id);
-      }
+      await client.createTeam(account, nombre, user.id, correo, teamDraftId.current);
+      teamDraftId.current = crypto.randomUUID();
       toast('Team creado exitosamente');
       setView('teams');
       form.reset();
     } catch (error) {
       toast('Error al crear el Team: ' + (error instanceof Error ? error.message : 'Error desconocido'));
-    }
+    } finally { submitting.current = false; setBusy(false); }
   };
 
   const handleCreateWish = async (e: FormEvent) => {
@@ -165,14 +129,17 @@ export default function Wishes() {
     const descripcion = (form.elements.namedItem('wish-description') as HTMLTextAreaElement).value;
     const montoObjetivo = Number((form.elements.namedItem('wish-amount') as HTMLInputElement).value);
 
+    if (submitting.current) return;
+    submitting.current = true; setBusy(true);
     try {
-      await client.createWish(account, selectedTeam.id, titulo, descripcion, montoObjetivo, user.id);
+      await client.createWish(account, selectedTeam.id, titulo, descripcion, montoObjetivo, user.id, wishDraftId.current);
+      wishDraftId.current = crypto.randomUUID();
       toast('Deseo creado exitosamente');
       setView('team-detail');
       form.reset();
     } catch (error) {
       toast('Error al crear el Deseo: ' + (error instanceof Error ? error.message : 'Error desconocido'));
-    }
+    } finally { submitting.current = false; setBusy(false); }
   };
 
   const handleVote = async (wishId: string, tipo: VotoTipo) => {
@@ -239,6 +206,9 @@ export default function Wishes() {
             <Star size={24} />
             Deseos
           </h1>
+          <button className="text-button" disabled={syncing} onClick={() => void sync().catch(error => toast(error instanceof Error ? error.message : 'No se pudo actualizar'))}>
+            <RefreshCw size={16} className={syncing ? 'spin' : ''} /> Actualizar
+          </button>
           <button
             className="button primary"
             onClick={() => setView('create-team')}
@@ -248,9 +218,7 @@ export default function Wishes() {
           </button>
         </header>
 
-        {loadingTeams ? (
-          <p className="text-center">Cargando teams...</p>
-        ) : teams.length === 0 ? (
+        {teams.length === 0 ? (
           <Empty
             title="Aún no tienes Teams"
             text="Crea tu primer Team para empezar a planificar deseos en pareja."
@@ -306,19 +274,20 @@ export default function Wishes() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="invite-email">Invitar por correo</label>
+              <label htmlFor="invite-email">Invitar por correos</label>
               <input
                 id="invite-email"
                 type="email"
-                placeholder="correo@ejemplo.com"
+                multiple
+                placeholder="ana@ejemplo.com, luis@ejemplo.com"
               />
               <small className="form-hint">
-                Solo puedes invitar usuarios registrados en la base de datos
+                Separa cada correo con una coma. Todas las personas deben estar registradas.
               </small>
             </div>
 
-            <button type="submit" className="button primary full-width">
-              Crear Team
+            <button type="submit" className="button primary full-width" disabled={busy || !account}>
+              {busy ? 'Guardando…' : 'Crear Team'}
             </button>
           </form>
         </Card>
@@ -560,13 +529,14 @@ export default function Wishes() {
                 id="wish-amount"
                 type="number"
                 placeholder="0"
-                min="0"
+                min="0.01"
+                step="0.01"
                 required
               />
             </div>
 
-            <button type="submit" className="button primary full-width">
-              Crear Deseo
+            <button type="submit" className="button primary full-width" disabled={busy || !account}>
+              {busy ? 'Guardando…' : 'Crear Deseo'}
             </button>
           </form>
         </Card>

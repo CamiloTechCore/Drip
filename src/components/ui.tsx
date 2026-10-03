@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { animate, motion, useReducedMotion } from "framer-motion";
 import {
   X,
@@ -123,9 +124,12 @@ export function Sheet({
     const previous = document.activeElement as HTMLElement | null;
     const old = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const app = document.getElementById('root');
+    const wasInert = app?.inert ?? false;
+    if (app) app.inert = true;
     (
       ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current
-    )?.focus();
+    )?.focus({ preventScroll: true });
     const listener = (e: KeyboardEvent) => {
       if (e.key === "Escape") close.current();
       if (e.key === "Tab") {
@@ -151,12 +155,13 @@ export function Sheet({
     document.addEventListener("keydown", listener);
     return () => {
       document.body.style.overflow = old;
+      if (app) app.inert = wasInert;
       document.removeEventListener("keydown", listener);
-      previous?.focus();
+      previous?.focus({ preventScroll: true });
     };
   }, []);
-  return (
-    <div className="sheet-overlay" onClick={onClose}>
+  return createPortal(
+    <div className="modal-root"><div className="sheet-overlay" onClick={onClose}>
       <motion.div
         ref={ref}
         tabIndex={-1}
@@ -189,7 +194,7 @@ export function Sheet({
         </div>
         {children}
       </motion.div>
-    </div>
+    </div></div>, document.body
   );
 }
 export const categoryIcons: Record<string, typeof Wallet> = {

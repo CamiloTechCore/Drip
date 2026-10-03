@@ -144,7 +144,7 @@ describe('no-spend streaks and weekly reductions', () => {
   it('counts unconfirmed days, ignores fixed payments by default, and records best history', () => {
     const rows = [salary('2026-09-01'), record('2026-09-08'), record('2026-09-09', { subtipo: 'fijo' }),
       record('2026-09-10', { tipo: 'deuda_pago' }), record('2026-09-11', { tipo: 'sin_gasto', monto: 0 })];
-    expect(getStreaks(rows, cfg(), '2026-09-12')).toMatchObject({ current: 4, best: 7, confirmedDays: ['2026-09-11'], badges: [3, 7] });
+    expect(getStreaks(rows, cfg(), '2026-09-12')).toMatchObject({ current: 2, best: 7, confirmedDays: ['2026-09-11'], badges: [3, 7] });
     expect(getStreaks(rows, cfg({ excluir_fijos_de_racha: false }), '2026-09-12').current).toBe(2);
   });
   it('does not award days before the first observation or after today', () => {
@@ -155,6 +155,13 @@ describe('no-spend streaks and weekly reductions', () => {
   it('lets an actual expense override a same-day no-spend confirmation', () => {
     const rows = [record('2026-09-12'), record('2026-09-12', { tipo: 'sin_gasto', monto: 0 })];
     expect(getStreaks(rows, cfg(), '2026-09-12')).toMatchObject({ current: 0, confirmedDays: [] });
+  });
+  it.each([true, false])('a debt payment ends the streak even when excluding fixed expenses is %s', excluir_fijos_de_racha => {
+    const rows = [salary('2026-09-01'), record('2026-09-12', { tipo: 'sin_gasto', monto: 0 }), record('2026-09-12', { tipo: 'deuda_pago', monto: 100 })];
+    const config = cfg({ excluir_fijos_de_racha });
+    expect(getStreaks(rows, config, '2026-09-12')).toMatchObject({ current: 0, confirmedDays: [] });
+    expect(getHeatmap(rows, config, '2026-09', '2026-09-12')[11].confirmed).toBe(false);
+    expect(getStreaks(rows.slice(0, 2), config, '2026-09-12').current).toBe(12);
   });
   it('counts only completed fully observed weeks and requires a strict decrease', () => {
     const rows = [salary('2026-08-31'), record('2026-09-01', { monto: 100 }), record('2026-09-08', { monto: 80 }), record('2026-09-15', { monto: 60 }), record('2026-09-22', { monto: 9999 })];

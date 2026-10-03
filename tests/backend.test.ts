@@ -9,6 +9,7 @@ type Envelope<T = unknown> = { ok: boolean; data: T; error?: string; service?: s
 
 class Sheet {
   values: Cell[][] = [];
+  dataReads = 0;
   maxRows = 1000;
   constructor(readonly locked: () => boolean) {}
   getLastRow() { return this.values.length; }
@@ -17,7 +18,7 @@ class Sheet {
   setFrozenRows() { return this; }
   setColumnWidths() { return this; }
   insertRowsAfter(_row: number, count: number) { this.maxRows += count; }
-  getDataRange() { return this.getRange(1, 1, this.values.length || 1, Math.max(1, ...this.values.map(row => row.length))); }
+  getDataRange() { this.dataReads++; return this.getRange(1, 1, this.values.length || 1, Math.max(1, ...this.values.map(row => row.length))); }
   getRange(row: number | string, col = 1, rowCount = 1, colCount = 1) {
     const start = typeof row === 'number' ? row : 2;
     const range = {
@@ -110,7 +111,7 @@ describe('single-file Apps Script API', () => {
 
   it('keeps health public and rejects unknown actions before opening or writing the sheet', () => {
     const api = harness();
-    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.06' });
+    expect(api.health()).toEqual({ ok: true, service: 'finanzas', version: 'Drip_API:V:0.0.0.07' });
     expect(api.post({ action: 'not-a-real-action' }).error).toBe('UNKNOWN_ACTION');
     expect(api.sheets.size).toBe(0);
     expect(api.lockCount).toBe(0);
@@ -364,6 +365,56 @@ describe('single-file Apps Script API', () => {
     expect(listed.team_wallets).toHaveLength(1);
     expect(listed.team_wallets[0].saldo).toBe(0);
     expect(api.sheets.get('Teams')!.values[1][3]).toBe(JSON.stringify([user.id]));
+  });
+
+  it('preserves the original owner when an older client edits without usuario_id', () => {
+    const api = harness();
+    const original = api.post<Registro>({ action: 'upsert', registro: expense({ usuario_id: 'ana' }) }).data;
+    const stamp = new Date(Date.parse(original.actualizado_en) + 1).toISOString();
+    const edited = api.post<Registro>({ action: 'upsert', registro: expense({ monto: 9000, usuario_id: '', actualizado_en: stamp }) });
+    expect(edited.ok).toBe(true);
+    expect(edited.data).toMatchObject({ monto: 9000, usuario_id: 'ana' });
+  });
+
+  it('validates every invitation before writing and deduplicates comma-separated emails and retried team IDs', () => {
+    const api = harness();
+    const users = ['ana', 'luis', 'maria'].map(nombre => api.post<{ id: string }>({ action: 'register', nombre, correo: `${nombre}@example.com`, password: 'Clave123!' }).data.id);
+    const command = { action: 'createTeam', id: 'bulk-team', nombre: 'Viaje', usuario_id: users[0], includeSnapshot: true };
+    expect(api.post({ ...command, correos: 'luis@example.com, missing@example.com' }).error).toBe('USER_NOT_FOUND');
+    expect(api.post<DataSet>({ action: 'list' }).data.teams).toEqual([]);
+    const complete = { ...command, correos: ' Luis@example.com , maria@example.com, ana@example.com, luis@example.com' };
+    const created = api.post<{ result: Team; snapshot: DataSet }>(complete);
+    expect(created.ok).toBe(true);
+    expect(created.data.result.miembros).toEqual(users);
+    expect(created.data.snapshot.teams).toEqual([created.data.result]);
+    expect(created.data.snapshot.team_wallets).toHaveLength(1);
+    expect(api.post<{ result: Team }>(complete).data.result).toEqual(created.data.result);
+    expect(api.post<DataSet>({ action: 'list' }).data.teams).toHaveLength(1);
+  });
+
+  it('writes a renamed debt category and returns its canonical snapshot in the same sync request', () => {
+    const api = harness(); api.setup();
+    const categories = api.post<DataSet>({ action: 'list' }).data.categorias;
+    api.post({ action: 'saveEntity', entity: 'categoria', data: { ...categories.find(c => c.id === 'cat-deudas'), nombre: 'Créditos' } });
+    api.post({ action: 'saveEntity', entity: 'deuda', data: { id: 'debt-1', nombre: 'Crédito', acreedor: '', monto_inicial: 1000, tasa_interes_mensual: 0, fecha_inicio: '2026-09-01', cuota_minima: 100, dia_pago: 1, activa: true } });
+    const command = { action: 'sync', categorias: categories, operations: [{ action: 'upsert', registro: expense({ tipo: 'deuda_pago', subtipo: '', necesidad: '', categoria: 'Deudas', deuda_id: 'debt-1', usuario_id: 'same-user', monto: 100 }) }] };
+    const result = api.post<{ registros: Registro[]; snapshot: DataSet & { syncProtocol: number } }>(command);
+    expect(result.ok).toBe(true);
+    expect(result.data.registros[0]).toMatchObject({ categoria: 'Créditos', usuario_id: 'same-user' });
+    expect(result.data.snapshot.registros).toEqual(result.data.registros);
+    expect(result.data.snapshot.syncProtocol).toBe(1);
+    api.post(command);
+    expect(api.post<DataSet>({ action: 'list' }).data.registros).toHaveLength(1);
+  });
+
+  it('reads each table once per list request and does not reuse financial snapshots between requests', () => {
+    const api = harness(); api.setup();
+    api.sheets.forEach(sheet => { sheet.dataReads = 0; });
+    expect(api.post({ action: 'list' }).ok).toBe(true);
+    api.sheets.forEach((sheet, name) => { expect(sheet.dataReads).toBe(name === 'Usuarios' ? 0 : 1); });
+    const config = api.sheets.get('Config')!;
+    config.values.find(row => row[0] === 'moneda')![1] = 'USD';
+    expect(api.post<DataSet>({ action: 'list' }).data.config.moneda).toBe('USD');
   });
 
   it('loads existing Teams JSON members and string booleans without altering saved rows or wallets', () => {

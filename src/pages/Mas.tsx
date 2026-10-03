@@ -520,7 +520,7 @@ export default function Mas() {
                   type="checkbox"
                   defaultChecked={data.config.excluir_fijos_de_racha}
                 />
-                Excluir pagos fijos y abonos de la racha
+                Excluir gastos fijos de la racha (los abonos siempre cuentan)
               </label>
               <p className="footnote">
                 Cambiar la moneda modifica el formato; no convierte los montos.

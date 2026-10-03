@@ -347,7 +347,7 @@ export function getSavingsStreak(records: Registro[], today = todayISO()): Savin
 
 const breaksStreak = (record: Registro, config: Config): boolean => record.monto > 0 &&
   ((record.tipo === 'gasto' && !isSavingsDeposit(record) && (record.subtipo === 'variable' || !config.excluir_fijos_de_racha)) ||
-    (record.tipo === 'deuda_pago' && !config.excluir_fijos_de_racha));
+    record.tipo === 'deuda_pago');
 const mondayOf = (date: string): string => addDays(date, -((parse(date).getUTCDay() + 6) % 7));
 export interface Streaks {
   current: number; best: number; confirmedDays: string[]; badges: number[];

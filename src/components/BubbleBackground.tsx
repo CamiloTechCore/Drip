@@ -2,7 +2,7 @@
 export default function BubbleBackground() {
   return (
     <div className="bubble-background" aria-hidden="true">
-      {Array.from({ length: 14 }, (_, index) => <span key={index} />)}
+      {Array.from({ length: 24 }, (_, index) => <span key={index} />)}
     </div>
   );
 }

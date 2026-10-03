@@ -224,6 +224,12 @@ function DripApp() {
               <div className="skeleton skeleton-streak" />
               <div className="skeleton skeleton-chart" />
             </div>
+          ) : model.unavailable ? (
+            <div className="page" role="status">
+              <h1>No pudimos cargar tus datos</h1>
+              <p>Necesitas conexión para consultar tu información en este dispositivo. Pulsa Reintentar para leer Google Sheets.</p>
+              <button className="button primary" disabled={model.syncing} onClick={() => void model.sync().catch(() => undefined)}>Reintentar</button>
+            </div>
           ) : (
             <motion.div
               key={location.pathname}
