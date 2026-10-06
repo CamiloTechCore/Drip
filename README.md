@@ -4,7 +4,7 @@
 
 Drip es una PWA en español, de tema claro, adaptable a teléfonos, tablets y escritorio. Registra movimientos en Google Sheets mediante un único archivo de Google Apps Script, permite capturar gastos sin conexión y convierte el historial en ciclos, alertas y hábitos de ahorro.
 
-## 🌟 Visión y Propósito
+## 🌟 Visión y Propósito 
 
 Drip nace con la misión de transformar la relación de las parejas con el dinero. Creemos firmemente que **compartir buenos hábitos financieros es fundamental**, incluso cuando no se vive bajo el mismo techo. La transparencia en los gastos, la comunicación abierta sobre metas financieras y el trabajo conjunto hacia objetivos comunes son pilares que fortalecen cualquier relación.
 
