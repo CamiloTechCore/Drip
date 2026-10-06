@@ -88,9 +88,9 @@ export function validateRegistro(value: Registro, data: DataSet): Registro {
   }
   if ((row.tipo === 'ingreso' || row.tipo === 'gasto') && category.tipo !== row.tipo) throw new Error('La categoría no corresponde al tipo de movimiento.');
   if (row.tipo === 'deuda_aumento' || row.tipo === 'deuda_pago') {
-    if (!data.deudas.some(debt => debt.id === row.deuda_id)) throw new Error('Selecciona una deuda existente.');
+    if (!data.deudas.some(debt => debt.id === row.deuda_id && (!debt.usuario_id || debt.usuario_id === row.usuario_id))) throw new Error('Selecciona una deuda existente.');
   } else if (row.deuda_id) throw new Error('Solo un movimiento de deuda puede enlazar una deuda.');
-  if (row.recurrente_id && (row.tipo !== 'gasto' || row.subtipo !== 'fijo' || !data.recurrentes.some(template => template.id === row.recurrente_id))) throw new Error('La plantilla debe existir y el movimiento debe ser un gasto fijo.');
+  if (row.recurrente_id && (row.tipo !== 'gasto' || row.subtipo !== 'fijo' || !data.recurrentes.some(template => template.id === row.recurrente_id && (!template.usuario_id || template.usuario_id === row.usuario_id)))) throw new Error('La plantilla debe existir y el movimiento debe ser un gasto fijo.');
   return row;
 }
 
@@ -107,7 +107,7 @@ export function validateEntity(entity: EntityName, value: Entity, data: DataSet)
   }
   if (entity === 'deuda') {
     const debt = value as Deuda;
-    return { ...base, nombre: text(debt.nombre, 'El nombre', 100, true), acreedor: text(debt.acreedor, 'El acreedor', 150), monto_inicial: number(debt.monto_inicial, 'El saldo inicial'), tasa_interes_mensual: number(debt.tasa_interes_mensual, 'La tasa mensual', 0, 100), fecha_inicio: validDate(debt.fecha_inicio), cuota_minima: number(debt.cuota_minima, 'La cuota'), dia_pago: number(debt.dia_pago, 'El día de pago', 1, 31, true) };
+    return { ...base, usuario_id: debt.usuario_id, nombre: text(debt.nombre, 'El nombre', 100, true), acreedor: text(debt.acreedor, 'El acreedor', 150), monto_inicial: number(debt.monto_inicial, 'El saldo inicial'), tasa_interes_mensual: number(debt.tasa_interes_mensual, 'La tasa mensual', 0, 100), fecha_inicio: validDate(debt.fecha_inicio), cuota_minima: number(debt.cuota_minima, 'La cuota'), dia_pago: number(debt.dia_pago, 'El día de pago', 1, 31, true) };
   }
   const template = value as Recurrente;
   let category = text(template.categoria, 'La categoría', 80, true);
@@ -120,7 +120,7 @@ export function validateEntity(entity: EntityName, value: Entity, data: DataSet)
       throw new Error('No hay categorías de gasto disponibles. Configura al menos una categoría de gasto.');
     }
   }
-  return { ...base, descripcion: text(template.descripcion, 'La descripción', 500, true), monto: number(template.monto, 'El monto'), categoria: category, tags: tags(template.tags), frecuencia: enumeration(template.frecuencia, ['semanal', 'quincenal', 'mensual', 'anual'], 'la frecuencia'), dia: number(template.dia, 'El día de pago', 1, 31, true), proximo_pago: validDate(template.proximo_pago), metodo_pago: enumeration(template.metodo_pago, methods, 'el método de pago') };
+  return { ...base, usuario_id: template.usuario_id, descripcion: text(template.descripcion, 'La descripción', 500, true), monto: number(template.monto, 'El monto'), categoria: category, tags: tags(template.tags), frecuencia: enumeration(template.frecuencia, ['semanal', 'quincenal', 'mensual', 'anual'], 'la frecuencia'), dia: number(template.dia, 'El día de pago', 1, 31, true), proximo_pago: validDate(template.proximo_pago), metodo_pago: enumeration(template.metodo_pago, methods, 'el método de pago') };
 }
 
 export function validateConfig(config: Config): Config {

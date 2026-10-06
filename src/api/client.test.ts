@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clear, set } from 'idb-keyval';
 import { deleteWish, contributeWish, deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, selectUserData, syncAccount, type Account, type CacheState, type Operation } from './client';
+import { getDebtSummary, getSavingsStreak } from '../lib/analytics';
 import { EMPTY_DATA } from '../lib/defaults';
 import type { Categoria, Recurrente, Registro } from '../types';
 
@@ -453,4 +454,22 @@ describe('local validation and demo parity', () => {
    await expect(contributeWish(account, 'wish-1', 25000, 'owner', 'operation-1')).rejects.toThrow('todavía no permite registrar aportes');
    expect(fetchMock).toHaveBeenCalledTimes(2);
    expect(await readCache(account)).toEqual(before);
+ });
+
+ it('isolates debts, savings and recurring templates while retaining shared wishes', () => {
+   const debt = { id: 'debt-a', nombre: 'Tarjeta', acreedor: '', monto_inicial: 50000, tasa_interes_mensual: 0, fecha_inicio: '2026-09-01', cuota_minima: 1000, dia_pago: 1, activa: true };
+   const recurring = { id: 'rec-a', descripcion: 'Internet', monto: 1000, categoria: 'Servicios', tags: '', frecuencia: 'mensual' as const, dia: 1, proximo_pago: '2026-10-01', metodo_pago: 'transferencia' as const, activa: true };
+   const data = { ...EMPTY_DATA, deudas: [{...debt, usuario_id: 'a'}, {...debt, id: 'debt-b', usuario_id: 'b'}, {...debt, id: 'orphan'}], recurrentes: [{...recurring, usuario_id: 'a'}, {...recurring, id: 'rec-b', usuario_id: 'b'}, {...recurring, id: 'orphan'}],
+     registros: [row('deposit-a', { usuario_id: 'a', monto: 10000, tags: 'ahorro_deposito' }), row('deposit-b', { usuario_id: 'b', monto: 20000, tags: 'ahorro_deposito' }), row('orphan', { monto: 99999, tags: 'ahorro_deposito' })],
+     teams: [{ id: 'shared', nombre: 'Plan', creador_id: 'a', miembros: ['a','b'], creado_en: '', actualizado_en: '', activo: true }],
+     deseos: [{ id: 'wish', team_id: 'shared', titulo: 'Cena', descripcion: '', monto_objetivo: 50000, monto_actual: 0, creador_id: 'a', creado_en: '', actualizado_en: '', eliminado: false, votos: [], comentarios: [], aprobado: false }]
+   };
+   for (const id of ['a','b']) {
+     const selected = selectUserData(data, id);
+     expect(selected.deudas.map(d => d.id)).toEqual(['debt-' + id]);
+     expect(selected.recurrentes.map(r => r.id)).toEqual(['rec-' + id]);
+     expect(getDebtSummary(selected.deudas, selected.registros, '2026-10-05').balance).toBe(50000);
+     expect(getSavingsStreak(selected.registros, '2026-10-05').balance).toBe(id === 'a' ? 10000 : 20000);
+     expect(selected.deseos!.map(w => w.id)).toEqual(['wish']);
+   }
  });

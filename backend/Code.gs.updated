@@ -12,8 +12,8 @@ const API_VERSION = 'Drip_API:V:0.0.0.07';
 const HEADERS_ = {
   registros: ['id', 'fecha', 'tipo', 'subtipo', 'monto', 'categoria', 'tags', 'descripcion', 'metodo_pago', 'necesidad', 'recurrente_id', 'deuda_id', 'creado_en', 'actualizado_en', 'eliminado', 'usuario_id'],
   categorias: ['id', 'nombre', 'tipo', 'color', 'icono', 'presupuesto_mensual', 'activa'],
-  deudas: ['id', 'nombre', 'acreedor', 'monto_inicial', 'tasa_interes_mensual', 'fecha_inicio', 'cuota_minima', 'dia_pago', 'activa'],
-  recurrentes: ['id', 'descripcion', 'monto', 'categoria', 'tags', 'frecuencia', 'dia', 'proximo_pago', 'metodo_pago', 'activa'],
+  deudas: ['id', 'nombre', 'acreedor', 'monto_inicial', 'tasa_interes_mensual', 'fecha_inicio', 'cuota_minima', 'dia_pago', 'activa', 'usuario_id'],
+  recurrentes: ['id', 'descripcion', 'monto', 'categoria', 'tags', 'frecuencia', 'dia', 'proximo_pago', 'metodo_pago', 'activa', 'usuario_id'],
   config: ['clave', 'valor'],
   usuarios: ['id', 'nombre', 'correo', 'password_hash', 'salt', 'creado_en'],
   teams: ['id', 'nombre', 'creador_id', 'miembros', 'creado_en', 'actualizado_en', 'activo'],
@@ -96,7 +96,7 @@ function ensureSchema_() {
       const width = sheet.getLastColumn();
       const current = sheet.getRange(1, 1, 1, Math.max(width, headers.length)).getValues()[0];
       // V:0.0.0.01 no tenía usuario_id: se agrega la columna sin tocar filas existentes.
-      if (key === 'registros' && width === headers.length - 1 && headers.slice(0, -1).every(function (header, i) { return current[i] === header; })) {
+      if (['registros', 'deudas', 'recurrentes'].indexOf(key) >= 0 && width === headers.length - 1 && headers.slice(0, -1).every(function (header, i) { return current[i] === header; })) {
         sheet.getRange(1, headers.length, 1, 1).setValues([[headers[headers.length - 1]]]);
       } else if (headers.some(function (header, i) { return current[i] !== header; })) {
         throw apiError_('SCHEMA_MISMATCH', 'Encabezados inesperados en ' + TABLE_NAMES_[key] + '. Conserva el orden documentado antes de continuar.');
@@ -467,7 +467,10 @@ function applyOperations_(operations) {
     const clientStamp = rawStamp ? iso_(rawStamp, 'actualizado_en') : '';
     if (clientStamp && new Date(clientStamp).getTime() > Date.now() + 300000) throw apiError_('CLOCK_SKEW', 'La fecha del dispositivo está adelantada. Ajusta el reloj y reintenta.');
     let next;
-    if (op.action === 'upsert') next = validate_(op.registro, ctx);
+    if (op.action === 'upsert') {
+      next = validate_(op.registro, ctx);
+      if (previous && previous.usuario_id && next.usuario_id && next.usuario_id !== previous.usuario_id) throw apiError_('UNAUTHORIZED', 'No puedes cambiar el propietario de un movimiento.');
+    }
     if (previous && clientStamp && clientStamp <= (original[id] || '')) { returned[id] = previous; return; }
     if (op.action === 'delete' && !previous) return;
     // Reintentar una creación sin fecha de edición no debe revivir tombstones.
@@ -496,6 +499,10 @@ function handleSaveEntity_(p) {
   let index = rows.findIndex(function (row) { return row.id === obj.id; });
   if (p.entity === 'categoria' && rows.some(function (row) { return row.id !== obj.id && row.nombre.toLocaleLowerCase() === obj.nombre.toLocaleLowerCase(); })) throw apiError_('DUPLICATE_CATEGORY', 'Ya existe una categoría con ese nombre.');
   const previous = index < 0 ? null : rows[index];
+  if (p.entity !== 'categoria') {
+    if (!obj.usuario_id) throw apiError_('VALIDATION_ERROR', 'La deuda o el pago recurrente debe tener usuario_id.');
+    if (previous && previous.usuario_id !== obj.usuario_id) throw apiError_('UNAUTHORIZED', 'No puedes cambiar el propietario de este registro.');
+  }
   let records = [];
   let recurring = [];
   let changedRecords = [];
@@ -535,7 +542,8 @@ function handleSaveConfig_(p) {
   return next;
 }
 
-function handleMaterialize_() {
+function handleMaterialize_(p) {
+  const owner = id_(p && p.usuario_id);
   const templates = table_('recurrentes');
   const records = table_('registros');
   const existing = Object.create(null);
@@ -548,7 +556,7 @@ function handleMaterialize_() {
   const generated = [];
   let processed = 0;
   templates.forEach(function (template, index) {
-    if (!template.activa) return;
+    if (!template.activa || !template.usuario_id || (owner && template.usuario_id !== owner)) return;
     validateEntity_('recurrente', template, ctx);
     let cursor = template.proximo_pago;
     const initial = cursor;
@@ -557,7 +565,7 @@ function handleMaterialize_() {
       const key = template.id + '|' + cursor;
       if (!existing[key]) {
         const stamp = nowIso_();
-        const row = validate_({ id: 'rec:' + template.id + ':' + cursor, fecha: cursor, tipo: 'gasto', subtipo: 'fijo', monto: template.monto, categoria: template.categoria, tags: template.tags, descripcion: template.descripcion, metodo_pago: template.metodo_pago, necesidad: 'necesario', recurrente_id: template.id, deuda_id: '', eliminado: false }, ctx);
+        const row = validate_({ id: 'rec:' + template.id + ':' + cursor, fecha: cursor, tipo: 'gasto', subtipo: 'fijo', monto: template.monto, categoria: template.categoria, tags: template.tags, descripcion: template.descripcion, metodo_pago: template.metodo_pago, necesidad: 'necesario', recurrente_id: template.id, deuda_id: '', eliminado: false, usuario_id: template.usuario_id }, ctx);
         row.creado_en = stamp; row.actualizado_en = stamp;
         changedRecords.push(records.length); records.push(row); generated.push(row); existing[key] = true;
       }
@@ -569,7 +577,7 @@ function handleMaterialize_() {
   // Guardar registros primero hace seguros los reintentos tras fallo parcial.
   writeChanges_('registros', records, changedRecords);
   writeChanges_('recurrentes', templates, changedTemplates);
-  return { registros: generated, recurrentes: templates, pending: templates.some(function (r) { return r.activa && r.proximo_pago <= today; }), serverTime: nowIso_() };
+  return { registros: generated, recurrentes: templates, pending: templates.some(function (r) { return r.activa && r.usuario_id && (!owner || r.usuario_id === owner) && r.proximo_pago <= today; }), serverTime: nowIso_() };
 }
 
 function handleRegister_(p) {
@@ -626,9 +634,9 @@ function validate_(value, ctx) {
   if (!category) throw apiError_('VALIDATION_ERROR', 'La categoría no existe.');
   if ((row.tipo === 'ingreso' && category.tipo !== 'ingreso') || (row.tipo === 'gasto' && category.tipo !== 'gasto')) throw apiError_('VALIDATION_ERROR', 'El tipo de categoría no corresponde al movimiento.');
   if (row.tipo === 'deuda_aumento' || row.tipo === 'deuda_pago') {
-    if (!row.deuda_id || !ctx.deudas.some(function (d) { return d.id === row.deuda_id; })) throw apiError_('VALIDATION_ERROR', 'Selecciona una deuda existente.');
+    if (!row.deuda_id || !ctx.deudas.some(function (d) { return d.id === row.deuda_id && d.usuario_id === row.usuario_id; })) throw apiError_('VALIDATION_ERROR', 'Selecciona una deuda existente.');
   } else if (row.deuda_id) throw apiError_('VALIDATION_ERROR', 'deuda_id solo aplica a movimientos de deuda.');
-  if (row.recurrente_id && (!ctx.recurrentes.some(function (r) { return r.id === row.recurrente_id; }) || row.tipo !== 'gasto' || row.subtipo !== 'fijo')) throw apiError_('VALIDATION_ERROR', 'La plantilla recurrente no existe o el movimiento no es un gasto fijo.');
+  if (row.recurrente_id && (!ctx.recurrentes.some(function (r) { return r.id === row.recurrente_id && r.usuario_id === row.usuario_id; }) || row.tipo !== 'gasto' || row.subtipo !== 'fijo')) throw apiError_('VALIDATION_ERROR', 'La plantilla recurrente no existe o el movimiento no es un gasto fijo.');
   if (value.creado_en) iso_(value.creado_en, 'creado_en');
   if (value.actualizado_en) iso_(value.actualizado_en, 'actualizado_en');
   return row;
@@ -642,6 +650,7 @@ function validateEntity_(entity, value, ctx) {
     if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw apiError_('VALIDATION_ERROR', 'color debe ser hexadecimal de seis dígitos.');
     return Object.assign(base, { nombre: text_(value.nombre, 'nombre', 80, true), tipo: enum_(value.tipo, ['ingreso', 'gasto'], 'tipo'), color: color, icono: text_(value.icono || 'CircleEllipsis', 'icono', 40, true), presupuesto_mensual: 0 });
   }
+  base.usuario_id = value.usuario_id ? id_(value.usuario_id) : '';
   if (entity === 'deuda') return Object.assign(base, { nombre: text_(value.nombre, 'nombre', 100, true), acreedor: text_(value.acreedor || '', 'acreedor', 150, false), monto_inicial: number_(value.monto_inicial, 'monto_inicial', 0, 1000000000000), tasa_interes_mensual: number_(value.tasa_interes_mensual, 'tasa_interes_mensual', 0, 100), fecha_inicio: date_(value.fecha_inicio, 'fecha_inicio'), cuota_minima: number_(value.cuota_minima, 'cuota_minima', 0, 1000000000000), dia_pago: integer_(value.dia_pago, 'dia_pago', 1, 31) });
   if (base.id.length > 180) throw apiError_('VALIDATION_ERROR', 'El ID de una plantilla no debe superar 180 caracteres.');
   const category = text_(value.categoria, 'categoria', 80, true);

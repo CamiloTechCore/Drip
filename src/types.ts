@@ -8,8 +8,8 @@ export interface Registro {
 }
 export interface Usuario { id: string; nombre: string; correo: string }
 export interface Categoria { id: string; nombre: string; tipo: 'ingreso' | 'gasto'; color: string; icono: string; presupuesto_mensual: number; activa: boolean }
-export interface Deuda { id: string; nombre: string; acreedor: string; monto_inicial: number; tasa_interes_mensual: number; fecha_inicio: string; cuota_minima: number; dia_pago: number; activa: boolean }
-export interface Recurrente { id: string; descripcion: string; monto: number; categoria: string; tags: string; frecuencia: 'semanal' | 'quincenal' | 'mensual' | 'anual'; dia: number; proximo_pago: string; metodo_pago: Metodo; activa: boolean }
+export interface Deuda { usuario_id?: string; id: string; nombre: string; acreedor: string; monto_inicial: number; tasa_interes_mensual: number; fecha_inicio: string; cuota_minima: number; dia_pago: number; activa: boolean }
+export interface Recurrente { usuario_id?: string; id: string; descripcion: string; monto: number; categoria: string; tags: string; frecuencia: 'semanal' | 'quincenal' | 'mensual' | 'anual'; dia: number; proximo_pago: string; metodo_pago: Metodo; activa: boolean }
 export interface Config { moneda: string; umbral_hormiga: number; min_repeticiones_hormiga: number; tipo_ciclo: 'auto' | 'mensual' | 'quincenal'; dia_corte: number; excluir_fijos_de_racha: boolean; meta_reduccion_semanal_pct: number }
 export interface DataSet {
   registros: Registro[]; categorias: Categoria[]; deudas: Deuda[]; recurrentes: Recurrente[]; config: Config;

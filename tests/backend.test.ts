@@ -232,16 +232,16 @@ describe('single-file Apps Script API', () => {
 
   it('catches up monthly templates, retains day 31, and never recreates deleted occurrences', () => {
     const api = harness();
-    const template: Recurrente = { id: 'internet', descripcion: 'Internet', monto: 80000, categoria: 'Servicios', tags: 'hogar', frecuencia: 'mensual', dia: 31, proximo_pago: '2026-08-31', metodo_pago: 'transferencia', activa: true };
+    const template: Recurrente = { usuario_id: 'same-user', id: 'internet', descripcion: 'Internet', monto: 80000, categoria: 'Servicios', tags: 'hogar', frecuencia: 'mensual', dia: 31, proximo_pago: '2026-08-31', metodo_pago: 'transferencia', activa: true };
     expect(api.post({ action: 'saveEntity', entity: 'recurrente', data: template }).ok).toBe(true);
-    const first = api.post<{ registros: Registro[]; recurrentes: Recurrente[]; pending: boolean }>({ action: 'materializeRecurrentes' });
+    const first = api.post<{ registros: Registro[]; recurrentes: Recurrente[]; pending: boolean }>({ action: 'materializeRecurrentes', usuario_id: 'same-user' });
     expect(first.ok).toBe(true);
     expect(first.data.registros.map(r => r.fecha)).toEqual(['2026-08-31', '2026-09-30']);
     expect(first.data.recurrentes[0].proximo_pago).toBe('2026-10-31');
     expect(first.data.pending).toBe(false);
     api.post({ action: 'delete', id: first.data.registros[0].id, actualizado_en: '2026-09-30T20:00:01.000Z' });
     api.post({ action: 'saveEntity', entity: 'recurrente', data: template });
-    expect(api.post<{ registros: Registro[] }>({ action: 'materializeRecurrentes' }).data.registros).toHaveLength(0);
+    expect(api.post<{ registros: Registro[] }>({ action: 'materializeRecurrentes', usuario_id: 'same-user' }).data.registros).toHaveLength(0);
     expect(api.post<DataSet>({ action: 'list' }).data.registros).toHaveLength(2);
   });
 
@@ -397,7 +397,7 @@ describe('single-file Apps Script API', () => {
     const api = harness(); api.setup();
     const categories = api.post<DataSet>({ action: 'list' }).data.categorias;
     api.post({ action: 'saveEntity', entity: 'categoria', data: { ...categories.find(c => c.id === 'cat-deudas'), nombre: 'Créditos' } });
-    api.post({ action: 'saveEntity', entity: 'deuda', data: { id: 'debt-1', nombre: 'Crédito', acreedor: '', monto_inicial: 1000, tasa_interes_mensual: 0, fecha_inicio: '2026-09-01', cuota_minima: 100, dia_pago: 1, activa: true } });
+    api.post({ action: 'saveEntity', entity: 'deuda', data: { usuario_id: 'same-user', id: 'debt-1', nombre: 'Crédito', acreedor: '', monto_inicial: 1000, tasa_interes_mensual: 0, fecha_inicio: '2026-09-01', cuota_minima: 100, dia_pago: 1, activa: true } });
     const command = { action: 'sync', categorias: categories, operations: [{ action: 'upsert', registro: expense({ tipo: 'deuda_pago', subtipo: '', necesidad: '', categoria: 'Deudas', deuda_id: 'debt-1', usuario_id: 'same-user', monto: 100 }) }] };
     const result = api.post<{ registros: Registro[]; snapshot: DataSet & { syncProtocol: number } }>(command);
     expect(result.ok).toBe(true);
@@ -523,3 +523,40 @@ describe('single-file Apps Script API', () => {
     expect(api.post<{ team_wallets: TeamWallet[] }>({ action: 'list' }).data.team_wallets[0].saldo).toBe(100);
   });
 });
+
+ describe('personal financial ownership', () => {
+   it('adds owner columns to legacy debt and recurring sheets without rewriting rows', () => {
+     const api = harness(); api.setup();
+     for (const name of ['Deudas','Recurrentes']) {
+       const sheet = api.sheets.get(name)!;
+       sheet.values[0].pop();
+     }
+     api.sheets.get('Deudas')!.values[1] = ['legacy', 'Tarjeta', '', 1000, 0, '2026-09-01', 100, 1, true];
+     const original = api.sheets.get('Deudas')!.values[1].slice();
+     expect(api.post({ action: 'list' }).ok).toBe(true);
+     expect(api.sheets.get('Deudas')!.values[0].at(-1)).toBe('usuario_id');
+     expect(api.sheets.get('Recurrentes')!.values[0].at(-1)).toBe('usuario_id');
+     expect(api.sheets.get('Deudas')!.values[1]).toEqual(original);
+   });
+   it('stores owners, rejects reassignment and cross-owner debt payments', () => {
+     const api = harness();
+     const debt = { id: 'personal', usuario_id: 'a', nombre: 'Tarjeta', acreedor: '', monto_inicial: 50000, tasa_interes_mensual: 0, fecha_inicio: '2026-09-01', cuota_minima: 1000, dia_pago: 1, activa: true };
+     expect(api.post({ action: 'saveEntity', entity: 'deuda', data: debt }).ok).toBe(true);
+     expect(api.post({ action: 'saveEntity', entity: 'deuda', data: {...debt, usuario_id: 'b'} }).error).toBe('UNAUTHORIZED');
+     expect(api.post({ action: 'saveEntity', entity: 'deuda', data: {...debt, id: 'orphan', usuario_id: ''} }).ok).toBe(false);
+     const payment = expense({ id: 'pay', usuario_id: 'b', tipo: 'deuda_pago', subtipo: '', necesidad: '', deuda_id: debt.id });
+     expect(api.post({ action: 'upsert', registro: payment }).ok).toBe(false);
+     expect(api.post({ action: 'upsert', registro: {...payment, usuario_id: 'a'} }).ok).toBe(true);
+   });
+   it('materializes only the requested owners templates and marks generated expenses', () => {
+     const api = harness();
+     for (const usuario_id of ['a','b']) {
+       expect(api.post({ action: 'saveEntity', entity: 'recurrente', data: {id: 'rec-' + usuario_id, usuario_id, descripcion: 'Internet', monto: 1000, categoria: 'Servicios', tags: '', frecuencia: 'mensual', dia: 1, proximo_pago: '2026-09-01', metodo_pago: 'transferencia', activa: true} }).ok).toBe(true);
+     }
+     const result = api.post<{registros: Registro[]}>({ action: 'materializeRecurrentes', usuario_id: 'a' });
+     expect(result.ok).toBe(true);
+     expect(result.data.registros.length).toBeGreaterThan(0);
+     expect(result.data.registros.every(r => r.usuario_id === 'a' && r.recurrente_id === 'rec-a')).toBe(true);
+     expect(api.post({ action: 'materializeRecurrentes' }).ok).toBe(false);
+   });
+ });

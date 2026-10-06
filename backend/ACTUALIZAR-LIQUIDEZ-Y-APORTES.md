@@ -16,3 +16,13 @@ Reemplazar el contenido del proyecto Apps Script por Code.gs y actualizar la imp
 Se retira el presupuesto del editor, de la lista de categorías y del análisis mensual. La columna presupuesto_mensual se conserva por compatibilidad con hojas existentes, pero los guardados nuevos la fijan en cero.
 
 La acción deleteWish permite al creador del deseo o al creador del Team marcarlo como eliminado, incluso si ya recibió aportes. Los votos, comentarios y movimientos se conservan para auditoría; no se generan devoluciones ni cambia la liquidez. Ya no permite aportes o votos posteriores. Publicar backend y frontend juntos para habilitar el botón.
+
+## Propiedad de deudas, ahorros y pagos recurrentes
+
+Deudas agrega usuario_id como última columna J. Recurrentes agrega usuario_id como última columna K. El esquema se amplía sin reordenar las columnas ni asignar automáticamente registros huérfanos. Las entidades personales nuevas requieren propietario; no se permite cambiarlo. Los gastos recurrentes heredan el usuario_id de su plantilla y la generación se limita al usuario solicitante.
+
+Los movimientos y las transferencias de ahorro se muestran por usuario_id. Las deudas y las plantillas recurrentes también se filtran por el usuario actual; entidades sin propietario quedan ocultas. Los catálogos de categorías se conservan como referencia compartida; los deseos siguen visibles por pertenencia al Team.
+
+Auditoría real del 5 de octubre de 2026: 47 movimientos con propietario (19 del usuario indicado y 28 de la otra cuenta), ninguno sin ID. Dos deudas históricas se asignaron por instrucción del usuario a 320b46a2-f546-401d-b547-64732d1030b0 en Deudas!J2:J3. No existían plantillas recurrentes. No se modificaron montos, abonos ni deseos.
+
+Publicar el backend actualizado y el frontend, y volver a ingresar para rehidratar la caché. La arquitectura existente conserva una caché completa de la conexión y realiza la selección personal para las vistas; estos cambios no agregan autenticación por token ni controles de acceso basados en una sesión de servidor.

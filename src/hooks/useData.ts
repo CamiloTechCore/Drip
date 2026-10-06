@@ -70,21 +70,27 @@ export function useData() {
   }, [account, queryClient, queryKey, mutateSync, user?.id]);
   const saveRegistro = useCallback(async (registro: Registro) => {
     // Conserva quién lo creó originalmente; solo atribuye registros nuevos sin usuario_id.
-    const owned = registro.usuario_id ? registro : { ...registro, usuario_id: user?.id ?? '' };
+    if (!user) throw new Error('Ingresa a tu cuenta para registrar movimientos.');
+    if (registro.usuario_id && registro.usuario_id !== user.id) throw new Error('Este movimiento pertenece a otro usuario.');
+    const owned = { ...registro, usuario_id: user.id };
     await client.saveRegistro(requireAccount(), owned); await afterLocalWrite();
   }, [requireAccount, afterLocalWrite, user]);
   const deleteRegistro = useCallback(async (id: string) => {
+    if (!user || !query.data?.data.registros.some(row => row.id === id && row.usuario_id === user.id)) throw new Error('Este movimiento no pertenece a tu cuenta.');
     await client.deleteRegistro(requireAccount(), id); await afterLocalWrite();
-  }, [requireAccount, afterLocalWrite]);
+  }, [requireAccount, afterLocalWrite, user, query.data]);
   const saveEntity = useCallback(async (entity: EntityName, value: Entity) => {
-    await client.saveEntity(requireAccount(), entity, value); await queryClient.invalidateQueries({ queryKey });
-  }, [requireAccount, queryClient, queryKey]);
+    if (!user) throw new Error('Ingresa a tu cuenta para guardar.');
+    if (entity !== 'categoria' && 'usuario_id' in value && value.usuario_id && value.usuario_id !== user.id) throw new Error('Este registro pertenece a otro usuario.');
+    const owned = entity === 'categoria' ? value : { ...value, usuario_id: user.id };
+    await client.saveEntity(requireAccount(), entity, owned); await queryClient.invalidateQueries({ queryKey });
+  }, [requireAccount, queryClient, queryKey, user]);
   const saveConfig = useCallback(async (config: Config) => {
     await client.saveConfig(requireAccount(), config); await queryClient.invalidateQueries({ queryKey });
   }, [requireAccount, queryClient, queryKey]);
   const materialize = useCallback(async () => {
-    await client.materialize(requireAccount()); await queryClient.invalidateQueries({ queryKey });
-  }, [requireAccount, queryClient, queryKey]);
+    await client.materialize(requireAccount(), undefined, user?.id); await queryClient.invalidateQueries({ queryKey });
+  }, [requireAccount, queryClient, queryKey, user]);
   const importLocalRecords = useCallback(async () => {
     const count = await client.importLocalRecords(requireAccount()); await afterLocalWrite(); return count;
   }, [requireAccount, afterLocalWrite]);

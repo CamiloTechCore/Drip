@@ -448,6 +448,8 @@ export function selectUserData(data: DataSet, userId: string | undefined, isDemo
   const wishIds = new Set(deseos?.map(wish => wish.id));
   return {
     ...data, registros: data.registros.filter(record => record.usuario_id === userId && !(record.tipo === 'sin_gasto' && record.id.startsWith('wish-contribution-'))),
+    deudas: data.deudas.filter(debt => debt.usuario_id === userId),
+    recurrentes: data.recurrentes.filter(template => template.usuario_id === userId),
     ...(teams ? { teams } : {}), ...(deseos ? { deseos } : {}),
     ...(data.votos ? { votos: data.votos.filter(vote => !!vote.deseo_id && wishIds.has(vote.deseo_id)) } : {}),
     ...(data.comentarios ? { comentarios: data.comentarios.filter(comment => !!comment.deseo_id && wishIds.has(comment.deseo_id)) } : {}),
@@ -504,7 +506,7 @@ function nextRecurringDate(date: string, template: Recurrente): string {
   const last = new Date(Date.UTC(nextYear, nextMonth + 1, 0)).getUTCDate();
   return new Date(Date.UTC(nextYear, nextMonth, Math.min(template.dia, last))).toISOString().slice(0, 10);
 }
-export async function materialize(account: Account, through = today()): Promise<void> {
+export async function materialize(account: Account, through = today(), usuario_id?: string): Promise<void> {
   if (account.settings.isDemo) {
     let remaining = false;
     await changeCache(account, state => {
@@ -518,7 +520,7 @@ export async function materialize(account: Account, through = today()): Promise<
           const occurrence = `${template.id}|${cursor}`;
           if (!existing.has(occurrence)) {
             const stamp = new Date().toISOString();
-            records.push(validateRegistro({ id: `rec:${template.id}:${cursor}`, fecha: cursor, tipo: 'gasto', subtipo: 'fijo', monto: template.monto, categoria: template.categoria, tags: template.tags, descripcion: template.descripcion, metodo_pago: template.metodo_pago, necesidad: 'necesario', recurrente_id: template.id, deuda_id: '', eliminado: false, creado_en: stamp, actualizado_en: stamp }, state.data));
+            records.push(validateRegistro({ id: `rec:${template.id}:${cursor}`, fecha: cursor, tipo: 'gasto', subtipo: 'fijo', monto: template.monto, categoria: template.categoria, tags: template.tags, descripcion: template.descripcion, metodo_pago: template.metodo_pago, necesidad: 'necesario', recurrente_id: template.id, deuda_id: '', eliminado: false, creado_en: stamp, actualizado_en: stamp, usuario_id: template.usuario_id }, state.data));
             existing.add(occurrence);
           }
           processed++; cursor = nextRecurringDate(cursor, template);
@@ -532,9 +534,10 @@ export async function materialize(account: Account, through = today()): Promise<
     return;
   }
   await locked(`drip:sync:${account.namespace}`, async () => {
+    if (!usuario_id) throw new Error('Ingresa a tu cuenta para generar pagos recurrentes.');
     // A backend pass is capped to keep Apps Script within its execution limits.
     for (let pass = 0; pass < 12; pass++) {
-      const result = await request<{ pending: boolean }>(account, { action: 'materializeRecurrentes' });
+      const result = await request<{ pending: boolean }>(account, { action: 'materializeRecurrentes', usuario_id });
       if (!result.pending) { await syncUnlocked(account); return; }
     }
     await syncUnlocked(account);
