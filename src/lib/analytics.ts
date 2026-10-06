@@ -25,7 +25,7 @@ export const addMonths = (date: string, months: number): string => {
 const sum = (records: Registro[]): number => records.reduce((total, record) => total + record.monto, 0);
 const round = (value: number): number => Math.round((value + Number.EPSILON) * 100) / 100;
 export const filterRecords = (records: Registro[], start?: string, end?: string): Registro[] =>
-  records.filter(record => !record.eliminado && (!start || record.fecha >= start) && (!end || record.fecha <= end));
+  records.filter(record => !(record.tipo === 'sin_gasto' && record.id.startsWith('wish-contribution-')) && !record.eliminado && (!start || record.fecha >= start) && (!end || record.fecha <= end));
 
 const hasTag = (record: Registro, tag: string): boolean =>
   record.tags.split(',').some(value => value.trim().toLowerCase() === tag);

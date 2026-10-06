@@ -1,10 +1,11 @@
-import { useState, useMemo, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Star, Plus, Users, Wallet, ThumbsUp, ThumbsDown, Clock, MessageSquare, Check, Trash2, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { useDrip } from "../context";
 import { Card, Empty } from "../components/ui";
 import { useAuth } from "../store/auth";
 import { useSettings } from "../store/settings";
 import * as client from "../api/client";
+import { money } from "../lib/format";
 import type { Team, Deseo, VotoTipo } from "../types";
 
 export default function Wishes() {
@@ -13,6 +14,7 @@ export default function Wishes() {
   const { toast, data, sync, syncing } = useDrip();
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
+  const contributionAttempt = useRef<{ key: string; id: string } | null>(null);
   const teamDraftId = useRef(crypto.randomUUID());
   const wishDraftId = useRef(crypto.randomUUID());
   const [view, setView] = useState<'teams' | 'create-team' | 'team-detail' | 'create-wish'>('teams');
@@ -31,69 +33,10 @@ export default function Wishes() {
   // Every page reads the same normalized, account-filtered snapshot.
   const teams = (data.teams ?? []).filter(team => team.activo);
   const deseos = (data.deseos ?? []).filter(wish => !wish.eliminado);
-  const wallet = data.team_wallets?.find(value => value.team_id === selectedTeam?.id) ?? null;
 
-  // Datos demo para modo demo
-  const demoDeseos = useMemo(() => {
-    if (settings.isDemo && selectedTeam) {
-      return [
-        {
-          id: 'wish-1',
-          team_id: selectedTeam.id,
-          titulo: 'Entradas Museo Louvre',
-          descripcion: 'Quiero visitar el museo y ver la Mona Lisa',
-          monto_objetivo: 500000,
-          monto_actual: 200000,
-          creador_id: 'demo-user',
-          creado_en: '2026-01-01T00:00:00.000Z',
-          actualizado_en: '2026-01-01T00:00:00.000Z',
-          eliminado: false,
-          votos: [
-            { id: 'v1', usuario_id: 'demo-user', tipo: 'like', creado_en: '2026-01-01T00:00:00.000Z' },
-            { id: 'v2', usuario_id: 'user-2', tipo: 'like', creado_en: '2026-01-01T00:00:00.000Z' },
-          ],
-          comentarios: [],
-          aprobado: true,
-        },
-        {
-          id: 'wish-2',
-          team_id: selectedTeam.id,
-          titulo: 'Cena en Torre Eiffel',
-          descripcion: 'Cena romántica con vista a la torre',
-          monto_objetivo: 800000,
-          monto_actual: 0,
-          creador_id: 'user-2',
-          creado_en: '2026-01-01T00:00:00.000Z',
-          actualizado_en: '2026-01-01T00:00:00.000Z',
-          eliminado: false,
-          votos: [
-            { id: 'v3', usuario_id: 'demo-user', tipo: 'revision', creado_en: '2026-01-01T00:00:00.000Z' },
-          ],
-          comentarios: [
-            { id: 'c1', usuario_id: 'demo-user', texto: '¿Podemos buscar algo más económico?', creado_en: '2026-01-01T00:00:00.000Z' },
-          ],
-          aprobado: false,
-        },
-      ] as Deseo[];
-    }
-    return [] as Deseo[];
-  }, [settings.isDemo, selectedTeam]);
 
-  const demoWallet = useMemo(() => {
-    if (settings.isDemo && selectedTeam) {
-      return {
-        team_id: selectedTeam.id,
-        saldo: 200000,
-        creado_en: '2026-01-01T00:00:00.000Z',
-        actualizado_en: '2026-01-01T00:00:00.000Z',
-      };
-    }
-    return null;
-  }, [settings.isDemo, selectedTeam]);
+  const displayDeseos = deseos;
 
-  // Usar datos demo o datos reales
-  const displayDeseos = settings.isDemo ? demoDeseos : deseos;
-  const displayWallet = settings.isDemo ? demoWallet : wallet;
 
   const handleCreateTeam = async (e: FormEvent) => {
     e.preventDefault();
@@ -142,6 +85,18 @@ export default function Wishes() {
     } finally { submitting.current = false; setBusy(false); }
   };
 
+  const handleDeleteWish = async (wish: Deseo) => {
+    if (!user || !account || submitting.current) return;
+    if (!window.confirm('¿Eliminar este deseo? Los aportes y movimientos ya registrados se conservarán; esta acción no devuelve dinero.')) return;
+    submitting.current = true; setBusy(true);
+    try {
+      await client.deleteWish(account, wish.id, user.id);
+      setExpandedWish(null);
+      toast('Deseo eliminado');
+    } catch (error) { toast(error instanceof Error ? error.message : 'No se pudo eliminar el deseo'); }
+    finally { submitting.current = false; setBusy(false); }
+  };
+
   const handleVote = async (wishId: string, tipo: VotoTipo) => {
     if (!user || !account) {
       toast('Debes estar autenticado para votar');
@@ -168,39 +123,22 @@ export default function Wishes() {
     }
   };
 
-  const handleAddToWallet = async () => {
-    if (!user || !account || !selectedTeam) {
-      toast('Debes estar autenticado');
-      return;
-    }
-    const monto = prompt('¿Cuánto deseas agregar a la cartera?');
-    if (!monto) return;
+  const handleContribute = async (wish: Deseo, amount: number) => {
+    if (!user || !account || submitting.current) return;
+    submitting.current = true; setBusy(true);
     try {
-      await client.addToWallet(account, selectedTeam.id, Number(monto), user.id);
-      toast('Dinero agregado a la cartera');
-    } catch (error) {
-      toast('Error al agregar a la cartera: ' + (error instanceof Error ? error.message : 'Error desconocido'));
-    }
-  };
-
-  const handleWithdrawFromWallet = async () => {
-    if (!user || !account || !selectedTeam) {
-      toast('Debes estar autenticado');
-      return;
-    }
-    const monto = prompt('¿Cuánto deseas retirar de la cartera?');
-    if (!monto) return;
-    try {
-      await client.withdrawFromWallet(account, selectedTeam.id, Number(monto), user.id);
-      toast('Dinero retirado de la cartera');
-    } catch (error) {
-      toast('Error al retirar de la cartera: ' + (error instanceof Error ? error.message : 'Error desconocido'));
-    }
+      const key = JSON.stringify([wish.id, amount, user.id]);
+      if (contributionAttempt.current?.key !== key) contributionAttempt.current = { key, id: crypto.randomUUID() };
+      await client.contributeWish(account, wish.id, amount, user.id, contributionAttempt.current.id);
+      contributionAttempt.current = null;
+      toast('Aporte registrado y liquidez actualizada');
+    } catch (error) { toast(error instanceof Error ? error.message : 'No se pudo registrar el aporte'); }
+    finally { submitting.current = false; setBusy(false); }
   };
 
   if (view === 'teams') {
     return (
-      <div className="page">
+      <div className="page wishes-page">
         <header className="page-header">
           <h1>
             <Star size={24} />
@@ -297,8 +235,7 @@ export default function Wishes() {
 
   if (view === 'team-detail' && selectedTeam) {
     const teamDeseos = displayDeseos.filter(d => d.team_id === selectedTeam.id);
-    const isAdmin = selectedTeam.creador_id === user?.id;
-    const currentWallet = displayWallet;
+    const currentWallet = { saldo: teamDeseos.reduce((sum, wish) => sum + wish.monto_actual, 0) };
 
     return (
       <div className="page">
@@ -325,32 +262,15 @@ export default function Wishes() {
           <Card className="wallet-card">
             <div className="wallet-header">
               <Wallet size={24} />
-              <h2>Cartera del Team</h2>
+              <h2>Aportes a tus deseos</h2>
             </div>
             <div className="wallet-balance">
               <span className="wallet-amount">
                 ${currentWallet.saldo.toLocaleString()}
               </span>
-              <span className="wallet-label">disponibles</span>
+              <span className="wallet-label">aportados</span>
             </div>
-            <div className="wallet-actions">
-              <button
-                className="button primary"
-                onClick={handleAddToWallet}
-              >
-                <Plus size={16} />
-                Registrar ingreso
-              </button>
-              {isAdmin && (
-                <button
-                  className="button secondary"
-                  onClick={handleWithdrawFromWallet}
-                >
-                  <Trash2 size={16} />
-                  Retirar
-                </button>
-              )}
-            </div>
+            <p className="muted">Registra tus aportes dentro de cada deseo aprobado.</p>
           </Card>
         )}
 
@@ -366,7 +286,13 @@ export default function Wishes() {
               const dislikes = deseo.votos.filter(v => v.tipo === 'dislike').length;
               const revision = deseo.votos.filter(v => v.tipo === 'revision').length;
               const isExpanded = expandedWish === deseo.id;
-              const progress = (deseo.monto_actual / deseo.monto_objetivo) * 100;
+              const progress = deseo.monto_objetivo > 0 ? (deseo.monto_actual / deseo.monto_objetivo) * 100 : 0;
+              const members = [...new Set([...selectedTeam.miembros, deseo.creador_id])];
+              const cents = Math.round(deseo.monto_objetivo * 100);
+              const ordered = members.slice().sort();
+              const quota = (Math.floor(cents / members.length) + (ordered.indexOf(user?.id ?? '') < cents % members.length ? 1 : 0)) / 100;
+              const contributed = deseo.aportes?.[user?.id ?? ''] ?? 0;
+              const remaining = Math.max(0, Math.round((quota - contributed) * 100) / 100);
 
               return (
                 <Card key={deseo.id} className="wish-card">
@@ -409,6 +335,24 @@ export default function Wishes() {
                     </div>
                   )}
 
+                  {deseo.aprobado && (
+                    <form className="form-stack wish-contribution" onSubmit={event => {
+                      event.preventDefault();
+                      const form = event.currentTarget;
+                      const amount = Number((form.elements.namedItem('aporte') as HTMLInputElement).value);
+                      void handleContribute(deseo, amount);
+                    }}>
+                      <p className="muted">Cuota por persona: {money(quota, data.config.moneda)} · {members.length} participantes · Pendiente: {money(remaining, data.config.moneda)}</p>
+                      <p className="footnote">{deseo.creador_id === user?.id ? 'Tu primer aporte registra el gasto total del presupuesto. Los aportes de invitados llegan como ingresos.' : 'Tu aporte se descuenta de tu liquidez y llega al creador del deseo.'}</p>
+                      <label>Valor del aporte<input name="aporte" type="number" min="0.01" step="0.01" key={`${deseo.id}-${remaining}`} max={remaining} defaultValue={remaining} required /></label>
+                      <button className="button primary full" disabled={busy || !account || remaining <= 0 || deseo.monto_actual >= deseo.monto_objetivo}>Añadir valor al deseo</button>
+                    </form>
+                  )}
+                  {(deseo.creador_id === user?.id || selectedTeam.creador_id === user?.id) && (
+                    <button type="button" className="text-button danger-text" disabled={busy || !account} onClick={() => void handleDeleteWish(deseo)}>
+                      <Trash2 size={16} /> Eliminar deseo
+                    </button>
+                  )}
                   <div className="wish-votes">
                     <button
                       className={`vote-button ${deseo.votos.find(v => v.usuario_id === user?.id)?.tipo === 'like' ? 'active' : ''}`}

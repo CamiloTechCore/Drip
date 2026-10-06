@@ -654,3 +654,15 @@ interface TeamWallet {
 - **Documentación Usuario:** `README.md`
 - **Tests:** `tests/`
 - **URL Producción:** https://drip-inky.vercel.app/
+
+## Actualización #0017 — 5 de octubre de 2026
+
+- Inicio muestra la liquidez acumulada del usuario sin reinicios por ciclo o mes. Incluye ingresos adicionales, gastos, pagos de deuda y reservas/retiros de ahorro.
+- Análisis permite consultar todo el historial o seleccionar un mes.
+- Deseos incorpora cuotas individuales, aportes parciales, reintentos con ID estable y actualización del progreso. Los invitados registran gasto y el creador recibe ingreso; el creador registra el presupuesto completo como gasto una sola vez.
+- El creador del deseo o del Team puede eliminarlo mediante borrado lógico, conservando los movimientos y sin generar devoluciones.
+- Categorías deja de pedir montos o mostrar presupuestos mensuales. Se conserva la columna histórica por compatibilidad y se guarda en cero.
+- Demo queda desactivada, se retiran sus accesos y se ajusta la presentación de los deseos.
+- UNKNOWN_ACTION en acciones de deseos muestra instrucciones para actualizar la implementación publicada de Apps Script.
+- Validación: 142 pruebas aprobadas; compilación TypeScript, Vite y PWA completada. La publicación de backend y frontend y la verificación con datos reales permanecen pendientes.
+- Instrucciones: backend/ACTUALIZAR-LIQUIDEZ-Y-APORTES.md.

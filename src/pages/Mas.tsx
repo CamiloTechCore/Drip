@@ -6,7 +6,6 @@ import {
   CloudUpload,
   CreditCard,
   Download,
-  FlaskConical,
   Info,
   LogOut,
   Plus,
@@ -30,7 +29,6 @@ export default function Mas() {
   const {
     data,
     isDemo,
-    setDemo,
     sync,
     syncing,
     materialize,
@@ -171,7 +169,7 @@ export default function Mas() {
               },
               {
                 id: "categorias",
-                label: "Categorías y presupuestos",
+                label: "Categorías",
                 sub: "Dale un lugar a cada gasto",
                 icon: Shapes,
               },
@@ -228,21 +226,6 @@ export default function Mas() {
                 <small>Descarga una copia en CSV</small>
               </span>
               <ChevronRight size={18} />
-            </button>
-            <button className="menu-row" onClick={() => setDemo(!isDemo)}>
-              <span className="small-icon">
-                <FlaskConical size={20} />
-              </span>
-              <span>
-                <strong>Modo demo</strong>
-                <small>Explora con datos de ejemplo</small>
-              </span>
-              <span
-                role="switch"
-                aria-checked={isDemo}
-                aria-label="Modo demo"
-                className={`switch ${isDemo ? "on" : ""}`}
-              />
             </button>
             <button className="menu-row" onClick={() => select("acerca")}>
               <span className="small-icon">
@@ -391,11 +374,7 @@ export default function Mas() {
                   {!cat.activa && " · Inactiva"}
                 </strong>
                 <small>
-                  {cat.tipo === "ingreso"
-                    ? "Ingreso"
-                    : cat.presupuesto_mensual
-                      ? `Presupuesto: ${money(cat.presupuesto_mensual, data.config.moneda)}`
-                      : "Sin presupuesto mensual"}
+                  {cat.tipo === "ingreso" ? "Ingreso" : "Gasto"}
                 </small>
               </span>
               <ChevronRight size={17} />
@@ -550,8 +529,7 @@ export default function Mas() {
           </p>
           <div className="note">
             Tus movimientos viven en tu Google Sheet y se guardan en este
-            dispositivo para funcionar sin conexión. La demo usa un espacio
-            separado y nunca se envía a tu hoja.
+            dispositivo para funcionar sin conexión.
           </div>
           <p>Sin rastreadores. Sin cuentas adicionales. Un paso a la vez.</p>
           <small>Drip 1.0.0 · Hecho para iPhone</small>

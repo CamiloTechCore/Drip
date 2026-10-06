@@ -8,9 +8,9 @@ const environmentUrl = (import.meta.env.VITE_APPS_SCRIPT_URL ?? '').trim();
 function readSettings(): Settings {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
-    const stored = value && typeof value === 'object' ? value as Partial<Settings> : {};
+    void value;
     // The URL always comes from VITE_APPS_SCRIPT_URL; a stale stored value (even '') must never shadow it.
-    return { url: environmentUrl, isDemo: stored.isDemo === true };
+    return { url: environmentUrl, isDemo: false };
   } catch { return { url: environmentUrl, isDemo: false }; }
 }
 
@@ -18,8 +18,8 @@ let current = readSettings();
 export const getSettings = (): Settings => current;
 
 /** Only isDemo is persisted here; the connection URL is never read from or written to storage. */
-export function setSettings(next: Partial<Settings>): void {
-  const candidate = { url: environmentUrl, isDemo: next.isDemo ?? current.isDemo };
+export function setSettings(_next: Partial<Settings>): void {
+  const candidate = { url: environmentUrl, isDemo: false };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ isDemo: candidate.isDemo }));
   current = candidate;
   listeners.forEach(listener => listener());

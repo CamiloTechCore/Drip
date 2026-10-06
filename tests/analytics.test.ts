@@ -291,3 +291,10 @@ describe('opt-in demonstration', () => {
     expect(second.categorias[0].nombre).toBe('Sueldo');
   });
 });
+
+it('retains prior-month liquidity, extra income and reserved savings', () => {
+ const rows = [salary('2026-09-01', 100000), record('2026-09-15', {monto: 20000}), salary('2026-10-01', 50000), deposit('2026-10-02', 30000)];
+ expect(getTotals(rows).available).toBe(100000);
+ expect(getTotals(rows).income).toBe(150000);
+ expect(getTotals(rows, '2026-10-01', '2026-10-31').available).toBe(20000);
+});

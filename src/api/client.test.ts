@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clear, set } from 'idb-keyval';
-import { deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, selectUserData, syncAccount, type Account, type CacheState, type Operation } from './client';
+import { deleteWish, contributeWish, deleteRegistro, getAccount, importLocalRecords, materialize, mergeRegistros, readCache, saveConfig, saveEntity, saveRegistro, selectUserData, syncAccount, type Account, type CacheState, type Operation } from './client';
 import { EMPTY_DATA } from '../lib/defaults';
 import type { Categoria, Recurrente, Registro } from '../types';
 
@@ -443,3 +443,14 @@ describe('local validation and demo parity', () => {
     expect(state.queue).toHaveLength(0);
   });
 });
+
+ it('explains missing wish actions without deleting cached wishes or retrying the rejected request', async () => {
+   const account = await connected();
+   const before = await readCache(account);
+   const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: 'UNKNOWN_ACTION', message: 'Acción no reconocida.' }), { status: 200 }));
+   vi.stubGlobal('fetch', fetchMock);
+   await expect(deleteWish(account, 'wish-1', 'owner')).rejects.toThrow('todavía no permite eliminar deseos');
+   await expect(contributeWish(account, 'wish-1', 25000, 'owner', 'operation-1')).rejects.toThrow('todavía no permite registrar aportes');
+   expect(fetchMock).toHaveBeenCalledTimes(2);
+   expect(await readCache(account)).toEqual(before);
+ });

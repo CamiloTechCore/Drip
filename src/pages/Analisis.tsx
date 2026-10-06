@@ -52,34 +52,35 @@ export default function Analisis() {
   }, [params]);
   const { registros, config } = data;
   const today = todayISO();
-  const [period, setPeriod] = useState("cycle");
+  const [period, setPeriod] = useState("all");
   const [month, setMonth] = useState(`${today.slice(0, 7)}-01`);
   const cycles = getCycles(registros, config, today);
   const current = cycles.at(-1);
+  const [selectedMonth, setSelectedMonth] = useState(today.slice(0, 7));
   const start =
-    period === "30"
+    period === "all" ? ([...registros].filter(r => !r.eliminado && r.fecha <= today).map(r => r.fecha).sort()[0] ?? today)
+      : period === "month" ? `${selectedMonth}-01`
+      : period === "30"
       ? addDays(today, -29)
       : period === "3"
         ? addDays(addMonths(today, -3), 1)
         : period === "year"
           ? `${today.slice(0, 4)}-01-01`
           : (current?.start ?? `${today.slice(0, 7)}-01`);
-  const rows = filterRecords(registros, start, today);
+  const end = period === "month" ? [addDays(addMonths(`${selectedMonth}-01`, 1), -1), today].sort()[0] : today;
+  const rows = filterRecords(registros, start, end);
   const totals = getTotals(rows);
   const monthly = getMonthlySummary(rows);
   const categoryTotals = getCategoryTotals(rows);
   const tagTotals = getTagTotals(rows);
   const ants = getAntExpenses(registros, config, today);
   const repeated = getRepeatedExpenses(rows);
-  const growth = getUnnecessaryGrowth(registros, start, today);
+  const growth = getUnnecessaryGrowth(registros, start, end);
   const debt = getDebtSummary(data.deudas, registros, today);
   const streak = getStreaks(registros, config, today);
   const heatmap = getHeatmap(registros, config, month, today);
   const patterns = getSpendingPatterns(rows);
   const c = config.moneda;
-  const budgetTotals = getCategoryTotals(
-    filterRecords(registros, `${today.slice(0, 7)}-01`, today),
-  );
   const upcoming = data.recurrentes
     .filter((r) => r.activa)
     .sort((a, b) => a.proximo_pago.localeCompare(b.proximo_pago));
@@ -110,6 +111,8 @@ export default function Analisis() {
         aria-label="Periodo de análisis"
       >
         {[
+          ["all", "Todo"],
+          ["month", "Por mes"],
           ["cycle", "Este ciclo"],
           ["30", "30 días"],
           ["3", "3 meses"],
@@ -124,15 +127,16 @@ export default function Analisis() {
           </button>
         ))}
       </div>
+      {period === "month" && <label className="field-heading">Mes de análisis<input type="month" value={selectedMonth} max={today.slice(0, 7)} onChange={e => { if (e.target.value) setSelectedMonth(e.target.value); }} /></label>}
       <p className="period-label">
         {format(parseISO(start), "d MMM", { locale: es })} —{" "}
-        {format(parseISO(today), "d MMM yyyy", { locale: es })}
+        {format(parseISO(end), "d MMM yyyy", { locale: es })}
       </p>
       {rows.length === 0 && (
         <Card>
           <Empty
             title="Tu panorama necesita algunas gotas"
-            text="Agrega movimientos o activa la demo en Más para explorar cada gráfico."
+            text="Agrega movimientos para explorar cada gráfico."
           />
         </Card>
       )}
@@ -225,49 +229,6 @@ export default function Analisis() {
         ) : (
           <p className="empty-inline">
             Tus categorías aparecerán aquí al registrar gastos.
-          </p>
-        )}
-      </Card>
-      <Card>
-        <SectionTitle
-          title="Un límite que te cuida"
-          eyebrow="PRESUPUESTOS · ESTE MES"
-        />
-        {data.categorias
-          .filter((cat) => cat.activa && cat.presupuesto_mensual > 0)
-          .map((cat) => {
-            const spent =
-              budgetTotals.find((t) => t.name === cat.nombre)?.total ?? 0;
-            return (
-              <div className="budget" key={cat.id}>
-                <div>
-                  <span>{cat.nombre}</span>
-                  <strong>
-                    {Math.round((spent / cat.presupuesto_mensual) * 100)}%
-                  </strong>
-                </div>
-                <div
-                  className={`progress ${spent > cat.presupuesto_mensual ? "over" : ""}`}
-                >
-                  <span
-                    style={{
-                      width: `${Math.min(100, (spent / cat.presupuesto_mensual) * 100)}%`,
-                      background:
-                        spent > cat.presupuesto_mensual ? "#CC5454" : cat.color,
-                    }}
-                  />
-                </div>
-                <small>
-                  {money(spent, c)} de {money(cat.presupuesto_mensual, c)}
-                </small>
-              </div>
-            );
-          })}
-        {!data.categorias.some((cat) => cat.presupuesto_mensual > 0) && (
-          <p className="empty-inline">
-            Define un presupuesto en{" "}
-            <Link to="/mas?section=categorias">Más → Categorías</Link> y sigue
-            tu progreso.
           </p>
         )}
       </Card>

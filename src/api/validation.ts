@@ -98,7 +98,7 @@ export function validateEntity(entity: EntityName, value: Entity, data: DataSet)
   const base = { id: id(value.id, entity === 'recurrente' ? 180 : 200), activa: bool(value.activa, 'El estado') };
   if (entity === 'categoria') {
     const category = value as Categoria;
-    const next: Categoria = { ...base, nombre: text(category.nombre, 'El nombre', 80, true), tipo: enumeration(category.tipo, ['ingreso', 'gasto'], 'el tipo'), color: text(category.color, 'El color', 7, true), icono: text(category.icono, 'El icono', 40, true), presupuesto_mensual: number(category.presupuesto_mensual, 'El presupuesto') };
+    const next: Categoria = { ...base, nombre: text(category.nombre, 'El nombre', 80, true), tipo: enumeration(category.tipo, ['ingreso', 'gasto'], 'el tipo'), color: text(category.color, 'El color', 7, true), icono: text(category.icono, 'El icono', 40, true), presupuesto_mensual: 0 };
     if (!/^#[0-9a-f]{6}$/i.test(next.color)) throw new Error('El color debe tener seis dígitos hexadecimales.');
     if (data.categorias.some(item => item.id !== next.id && item.nombre.toLocaleLowerCase('es') === next.nombre.toLocaleLowerCase('es'))) throw new Error('Ya existe una categoría con ese nombre.');
     const previous = data.categorias.find(item => item.id === next.id);

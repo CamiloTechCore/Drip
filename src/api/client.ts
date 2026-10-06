@@ -156,7 +156,10 @@ export async function request<T>(account: Account, payload: Record<string, unkno
       catch { throw new ApiError('INVALID_RESPONSE', 'La conexión devolvió una página en lugar de datos. Revisa la URL /exec y que Apps Script permita el acceso a cualquier usuario.', hadTransportFailure); }
       if (!result || typeof result.ok !== 'boolean') throw new ApiError('INVALID_RESPONSE', 'La implementación no devolvió JSON válido. Revisa que esté publicada la versión actual de Apps Script.', hadTransportFailure);
       if (!result.ok) {
-        const message = result.message || `El servidor rechazó la operación (${result.error}).`;
+        const operation = payload.action === 'deleteWish' ? 'eliminar deseos' : payload.action === 'contributeWish' ? 'registrar aportes a deseos' : null;
+        const message = result.error === 'UNKNOWN_ACTION' && operation
+          ? 'La versión publicada de Apps Script todavía no permite ' + operation + '. Actualiza el backend Code.gs y publica una nueva versión de la implementación existente.'
+          : result.message || `El servidor rechazó la operación (${result.error}).`;
         // Validation and authorization failures are not transient.
         throw new ApiError(result.error, message, hadTransportFailure);
       }
@@ -444,7 +447,7 @@ export function selectUserData(data: DataSet, userId: string | undefined, isDemo
   const deseos = data.deseos?.filter(wish => teamIds.has(wish.team_id));
   const wishIds = new Set(deseos?.map(wish => wish.id));
   return {
-    ...data, registros: data.registros.filter(record => record.usuario_id === userId),
+    ...data, registros: data.registros.filter(record => record.usuario_id === userId && !(record.tipo === 'sin_gasto' && record.id.startsWith('wish-contribution-'))),
     ...(teams ? { teams } : {}), ...(deseos ? { deseos } : {}),
     ...(data.votos ? { votos: data.votos.filter(vote => !!vote.deseo_id && wishIds.has(vote.deseo_id)) } : {}),
     ...(data.comentarios ? { comentarios: data.comentarios.filter(comment => !!comment.deseo_id && wishIds.has(comment.deseo_id)) } : {}),
@@ -638,4 +641,14 @@ export async function addToWallet(account: Account, team_id: string, monto: numb
 export async function withdrawFromWallet(account: Account, team_id: string, monto: number, usuario_id: string): Promise<{ team_id: string; saldo: number }> {
   const result = await writeAndRefresh<{ team_id: string; saldo: number }>(account, { action: 'withdrawFromWallet', team_id, monto, usuario_id }, { retry: false });
   await cacheWallet(account, result); return result;
+}
+
+export async function contributeWish(account: Account, deseo_id: string, monto: number, usuario_id: string, id: string = crypto.randomUUID()): Promise<void> {
+  if (!Number.isFinite(monto) || monto <= 0) throw new Error('Ingresa un aporte mayor que cero.');
+  await writeAndRefresh(account, { action: 'contributeWish', deseo_id, monto, usuario_id, id });
+}
+
+export async function deleteWish(account: Account, deseo_id: string, usuario_id: string): Promise<void> {
+  await writeAndRefresh(account, { action: 'deleteWish', deseo_id, usuario_id });
+  await changeCache(account, state => ({ ...state, data: { ...state.data, deseos: state.data.deseos?.map(wish => wish.id === deseo_id ? { ...wish, eliminado: true } : wish) } }));
 }

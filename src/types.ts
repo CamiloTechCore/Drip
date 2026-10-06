@@ -42,6 +42,7 @@ export interface Deseo {
   descripcion: string;
   monto_objetivo: number;
   monto_actual: number;
+  aportes?: Record<string, number>;
   creador_id: string;
   creado_en: string;
   actualizado_en: string;

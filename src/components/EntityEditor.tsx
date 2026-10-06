@@ -49,7 +49,7 @@ export default function EntityEditor({
         tipo: str("tipo") as Categoria["tipo"],
         color,
         icono: str("icono"),
-        presupuesto_mensual: num("presupuesto"),
+        presupuesto_mensual: 0,
       };
     else if (entity === "deuda")
       result = {
@@ -108,17 +108,6 @@ export default function EntityEditor({
                 <option value="gasto">Gasto</option>
                 <option value="ingreso">Ingreso</option>
               </select>
-            </label>
-            <label>
-              Presupuesto mensual
-              <input
-                name="presupuesto"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                defaultValue={category?.presupuesto_mensual ?? 0}
-              />
             </label>
             <div className="form-two">
               <label>

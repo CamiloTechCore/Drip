@@ -2539,3 +2539,10 @@ input::placeholder {
   color: #9a9cac;
   margin-top: 4px;
 }
+
+/* Collaborative plans use the same card, spacing and accent system. */
+.wishes-page .page-header { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:24px; }
+.wishes-page .page-header h1 { flex:1; display:flex; align-items:center; gap:10px; }
+.wishes-page .wish-contribution { padding:16px 0; border-top:1px solid var(--border, #ecebf3); }
+.wishes-page .wallet-card { background:linear-gradient(135deg, #efedff, #f8f7ff); }
+.period-select { flex-wrap:wrap; }

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createContext, runInContext } from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getTotals } from '../src/lib/analytics';
 import type { DataSet, Registro, Recurrente, Team, Deseo, TeamWallet } from '../src/types';
 
 type Cell = string | number | boolean | Date;
@@ -469,6 +470,46 @@ describe('single-file Apps Script API', () => {
     expect(listed.deseos[0].comentarios).toHaveLength(1);
     expect(listed.deseos[0].aprobado).toBe(true);
     expect(api.post<{ aprobado: boolean }>({ action: 'voteWish', deseo_id: 'wish-1', usuario_id: partner, tipo: 'revision' }).data.aprobado).toBe(false);
+  });
+
+
+  it('journals a 50000 wish, partial contributions, personal liquidity and retries', () => {
+    const api = harness();
+    const owner = api.post<{ id: string }>({ action: 'register', nombre: 'Ana', correo: 'ana@example.com', password: 'Clave123!' }).data.id;
+    const partner = api.post<{ id: string }>({ action: 'register', nombre: 'Luis', correo: 'luis@example.com', password: 'Clave123!' }).data.id;
+    const team = api.post<Team>({ action: 'createTeam', nombre: 'Plan', usuario_id: owner }).data;
+    api.post({ action: 'inviteToTeam', team_id: team.id, correo: 'luis@example.com', usuario_id: owner });
+    const wish = api.post<Deseo>({ action: 'createWish', team_id: team.id, usuario_id: owner, titulo: 'Cena', monto_objetivo: 50000 }).data;
+    const contribute = (id: string, usuario_id: string, monto: number) => api.post({ action: 'contributeWish', id, deseo_id: wish.id, usuario_id, monto });
+    expect(contribute('before', partner, 10000).ok).toBe(false);
+    for (const usuario_id of [owner, partner]) api.post({ action: 'voteWish', deseo_id: wish.id, usuario_id, tipo: 'like' });
+    expect(contribute('first', partner, 10000).ok).toBe(true);
+    expect(contribute('first', partner, 10000).ok).toBe(true);
+    expect(contribute('over', partner, 20000).ok).toBe(false);
+    expect(contribute('second', partner, 15000).ok).toBe(true);
+    expect(contribute('owner', owner, 25000).ok).toBe(true);
+    const data = api.post<DataSet>({ action: 'list' }).data;
+    expect(data.deseos![0].monto_actual).toBe(50000);
+    expect(getTotals(data.registros.filter(r => r.usuario_id === partner)).available).toBe(-25000);
+    expect(getTotals(data.registros.filter(r => r.usuario_id === owner)).available).toBe(-25000);
+    const budget = data.registros.find(r => r.id === 'wish-budget-' + wish.id)!;
+    expect(budget.monto).toBe(50000);
+    expect(api.post({ action: 'delete', id: budget.id }).ok).toBe(false);
+    expect(api.post({ action: 'deleteWish', deseo_id: wish.id, usuario_id: partner }).error).toBe('UNAUTHORIZED');
+    const deletion = { action: 'deleteWish', deseo_id: wish.id, usuario_id: owner };
+    expect(api.post(deletion).ok).toBe(true);
+    expect(api.post(deletion).ok).toBe(true);
+    const after = api.post<DataSet>({ action: 'list' }).data;
+    expect(after.deseos![0].eliminado).toBe(true);
+    expect(after.registros).toEqual(data.registros);
+    expect(contribute('deleted', owner, 1).error).toBe('NOT_FOUND');
+  });
+
+  it('saves categories without a monthly budget, including legacy payloads', () => {
+    const api = harness(); api.setup();
+    const category = { id: 'cat-new', nombre: 'Nueva', tipo: 'gasto', color: '#615BEA', icono: 'Wallet', activa: true };
+    expect(api.post<{ presupuesto_mensual: number }>({ action: 'saveEntity', entity: 'categoria', data: category }).data.presupuesto_mensual).toBe(0);
+    expect(api.post<{ presupuesto_mensual: number }>({ action: 'saveEntity', entity: 'categoria', data: { ...category, presupuesto_mensual: 50000 } }).data.presupuesto_mensual).toBe(0);
   });
 
   it('rejects a nonmember and insufficient wallet withdrawals without changing the balance', () => {

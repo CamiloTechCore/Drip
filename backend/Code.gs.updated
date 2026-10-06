@@ -1,14 +1,13 @@
 const SPREADSHEET_ID = '1Qzzvv2ObVMYdN9rQRSHYEwEdhlfKH262nM0trH4YBpY'; /*NO MODIFICAR*/
 const SHEET_NAME = 'Registros';
 const TIMEZONE = 'America/Bogota';
-const API_VERSION = 'Drip_API:V:0.0.0.06'; // V:0.0.0.06 agrega Teams y Deseos para planificación colaborativa
+const API_VERSION = 'Drip_API:V:0.0.0.07';
 
 /* Drip — Daily Records for Individuals & Partners.
  * Único archivo del backend. Publicar como Web App: ejecutar como Yo,
  * acceso Cualquier usuario. Los intereses son porcentajes: tasa_interes_mensual = 2 significa 2 %.
  * Desde V:0.0.0.03 ya no existe un token de dispositivo: cada persona se
  * identifica únicamente con su correo y contraseña, guardados y validados en Usuarios.
- * Desde V:0.0.0.06 agrega funcionalidad de Teams y Deseos para planificación colaborativa.
  */
 const HEADERS_ = {
   registros: ['id', 'fecha', 'tipo', 'subtipo', 'monto', 'categoria', 'tags', 'descripcion', 'metodo_pago', 'necesidad', 'recurrente_id', 'deuda_id', 'creado_en', 'actualizado_en', 'eliminado', 'usuario_id'],
@@ -27,13 +26,17 @@ const TABLE_NAMES_ = { registros: SHEET_NAME, categorias: 'Categorias', deudas: 
 const DEFAULT_CONFIG_ = { moneda: 'COP', umbral_hormiga: 20000, min_repeticiones_hormiga: 3, tipo_ciclo: 'auto', dia_corte: 1, excluir_fijos_de_racha: true, meta_reduccion_semanal_pct: 0 };
 const TIPOS_ = ['ingreso', 'gasto', 'deuda_aumento', 'deuda_pago', 'sin_gasto'];
 const METODOS_ = ['efectivo', 'debito', 'credito', 'transferencia', 'otro'];
-const VOTO_TIPOS_ = ['like', 'dislike', 'revision'];
 const NUMERIC_FIELDS_ = ['monto', 'presupuesto_mensual', 'monto_inicial', 'tasa_interes_mensual', 'cuota_minima', 'dia_pago', 'dia', 'monto_objetivo', 'monto_actual', 'saldo'];
-const BOOLEAN_FIELDS_ = ['activa', 'eliminado', 'aprobado'];
+const BOOLEAN_FIELDS_ = ['activa', 'activo', 'eliminado', 'aprobado'];
 const DATE_FIELDS_ = ['fecha', 'fecha_inicio', 'proximo_pago'];
 var bookCache_;
+// Solo durante esta petición: nunca se reutilizan datos financieros entre sesiones.
+var tableCache_ = Object.create(null);
+var sheetCache_ = Object.create(null);
 
 function setup() {
+  tableCache_ = Object.create(null);
+  sheetCache_ = Object.create(null);
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -48,6 +51,8 @@ function setup() {
 function doGet(e) { return json_({ ok: true, service: 'finanzas', version: API_VERSION }); }
 
 function doPost(e) {
+  tableCache_ = Object.create(null);
+  sheetCache_ = Object.create(null);
   let lock;
   let acquired = false;
   try {
@@ -56,31 +61,22 @@ function doPost(e) {
     let p;
     try { p = JSON.parse(e.postData.contents); } catch (err) { throw apiError_('BAD_JSON', 'El cuerpo debe ser JSON válido.'); }
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw apiError_('BAD_REQUEST', 'La petición debe ser un objeto.');
-    const handlers = { 
-      list: handleList_, 
-      upsert: handleUpsert_, 
-      batch: handleBatch_, 
-      delete: handleDelete_, 
-      saveEntity: handleSaveEntity_, 
-      saveConfig: handleSaveConfig_, 
-      materializeRecurrentes: handleMaterialize_, 
-      register: handleRegister_, 
-      login: handleLogin_,
-      createTeam: handleCreateTeam_,
-      inviteToTeam: handleInviteToTeam_,
-      createWish: handleCreateWish_,
-      voteWish: handleVoteWish_,
-      addComment: handleAddComment_,
-      addToWallet: handleAddToWallet_,
-      withdrawFromWallet: handleWithdrawFromWallet_
-    };
+    const handlers = { list: handleList_, sync: handleSync_, upsert: handleUpsert_, batch: handleBatch_, delete: handleDelete_, saveEntity: handleSaveEntity_, saveConfig: handleSaveConfig_, materializeRecurrentes: handleMaterialize_, register: handleRegister_, login: handleLogin_, createTeam: handleCreateTeam_, inviteToTeam: handleInviteToTeam_, createWish: handleCreateWish_, deleteWish: handleDeleteWish_, voteWish: handleVoteWish_, addComment: handleAddComment_, contributeWish: handleContributeWish_, addToWallet: handleAddToWallet_, withdrawFromWallet: handleWithdrawFromWallet_ };
     if (!Object.prototype.hasOwnProperty.call(handlers, p.action)) throw apiError_('UNKNOWN_ACTION', 'Acción no reconocida.');
+    // También bloqueamos las lecturas: esquema, semillas y cursor consistente
+    // requieren escritura, y no se debe leer un batch parcialmente aplicado.
     lock = LockService.getScriptLock();
     lock.waitLock(30000);
     acquired = true;
     ensureSchema_();
-    return ok_(handlers[p.action](p));
+    const result = handlers[p.action](p);
+    // Confirma la escritura y lee el estado resultante bajo el mismo bloqueo.
+    if (p.includeSnapshot === true && p.action !== 'list' && p.action !== 'sync' && p.action !== 'login' && p.action !== 'register') {
+      return ok_({ result: result, snapshot: handleList_({}) });
+    }
+    return ok_(result);
   } catch (err) {
+    // No devolvemos stacks, IDs de la hoja ni errores internos de Google.
     return fail_(err.apiCode || 'SERVER_ERROR', err.apiCode ? err.message : 'No se pudo completar la operación. Reintenta en un momento.');
   } finally { if (acquired && lock) lock.releaseLock(); }
 }
@@ -92,13 +88,14 @@ function ensureSchema_() {
     let sheet = book.getSheetByName(TABLE_NAMES_[key]);
     const headers = HEADERS_[key];
     if (!sheet) sheet = book.insertSheet(TABLE_NAMES_[key]);
+    sheetCache_[TABLE_NAMES_[key]] = sheet;
     if (sheet.getLastRow() === 0) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       created.push(key);
     } else {
       const width = sheet.getLastColumn();
       const current = sheet.getRange(1, 1, 1, Math.max(width, headers.length)).getValues()[0];
-      // Migración V:0.0.0.01 a V:0.0.0.03 - agregar usuario_id
+      // V:0.0.0.01 no tenía usuario_id: se agrega la columna sin tocar filas existentes.
       if (key === 'registros' && width === headers.length - 1 && headers.slice(0, -1).every(function (header, i) { return current[i] === header; })) {
         sheet.getRange(1, headers.length, 1, 1).setValues([[headers[headers.length - 1]]]);
       } else if (headers.some(function (header, i) { return current[i] !== header; })) {
@@ -106,7 +103,11 @@ function ensureSchema_() {
       }
     }
   });
+  // Primero existen todas las pestañas; así la validación de categorías
+  // también queda instalada cuando el primer POST crea la hoja automáticamente.
   created.forEach(function (key) { formatSheet_(sheet_(TABLE_NAMES_[key]), key); });
+  // No uses getLastRow(): la casilla de 'activa' deja FALSE en cientos de filas
+  // vacías al formatear, e infla getLastRow() antes de sembrar las categorías.
   if (table_('categorias').length === 0) {
     const seeds = [
       ['sueldo', 'Sueldo', 'ingreso', '#10b981', 'Wallet'], ['extra', 'Ingreso extra', 'ingreso', '#34d399', 'Sparkles'],
@@ -119,10 +120,14 @@ function ensureSchema_() {
       ['otros', 'Otros', 'gasto', '#64748b', 'CircleEllipsis']
     ].map(function (row) { return ['cat-' + row[0], row[1], row[2], row[3], row[4], 0, true]; });
     sheet_('Categorias').getRange(2, 1, seeds.length, HEADERS_.categorias.length).setValues(seeds);
+    delete tableCache_.categorias;
   }
   const existing = table_('config');
   const missing = Object.keys(DEFAULT_CONFIG_).filter(function (key) { return !existing.some(function (row) { return row.clave === key; }); });
-  if (missing.length) sheet_('Config').getRange(existing.length + 2, 1, missing.length, 2).setValues(missing.map(function (key) { return [key, DEFAULT_CONFIG_[key]]; }));
+  if (missing.length) {
+    sheet_('Config').getRange(existing.length + 2, 1, missing.length, 2).setValues(missing.map(function (key) { return [key, DEFAULT_CONFIG_[key]]; }));
+    delete tableCache_.config;
+  }
 }
 
 function formatSheet_(sheet, key) {
@@ -131,6 +136,7 @@ function formatSheet_(sheet, key) {
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, headers.length).setBackground('#4f46e5').setFontColor('#ffffff').setFontWeight('bold');
   sheet.setColumnWidths(1, headers.length, 145);
+  // Fechas y textos explícitos previenen conversiones automáticas de IDs/ISO.
   headers.forEach(function (field, index) {
     const range = sheet.getRange(2, index + 1, size, 1);
     if (NUMERIC_FIELDS_.indexOf(field) >= 0) range.setNumberFormat('#,##0.00');
@@ -139,12 +145,14 @@ function formatSheet_(sheet, key) {
   const rules = key === 'registros' ? { tipo: TIPOS_, subtipo: ['sueldo', 'adicional', 'variable', 'fijo', ''], metodo_pago: METODOS_, necesidad: ['necesario', 'innecesario', ''] }
     : key === 'categorias' ? { tipo: ['ingreso', 'gasto'] }
       : key === 'recurrentes' ? { frecuencia: ['semanal', 'quincenal', 'mensual', 'anual'], metodo_pago: METODOS_ }
-      : key === 'votos' ? { tipo: VOTO_TIPOS_ } : {};
+        : key === 'votos' ? { tipo: ['like', 'dislike', 'revision'] } : {};
   Object.keys(rules).forEach(function (field) {
     sheet.getRange(2, headers.indexOf(field) + 1, size, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(rules[field], true).setAllowInvalid(false).build());
   });
   if (key === 'registros' || key === 'recurrentes') {
     const categorySheet = book_().getSheetByName('Categorias');
+    // Lista orientativa en Sheets para permitir renombrados en cascada; la API
+    // siempre valida las referencias antes de escribir.
     if (categorySheet) sheet.getRange(2, headers.indexOf('categoria') + 1, size, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInRange(categorySheet.getRange('B2:B'), true).setAllowInvalid(true).build());
   }
   headers.forEach(function (field, index) {
@@ -154,238 +162,257 @@ function formatSheet_(sheet, key) {
 
 function handleList_(p) {
   const since = p.since ? iso_(p.since, 'since') : '';
+  const votos = table_('votos');
+  const comentarios = table_('comentarios');
+  const votesByWish = Object.create(null);
+  const commentsByWish = Object.create(null);
+  votos.forEach(function (vote) { (votesByWish[vote.deseo_id] || (votesByWish[vote.deseo_id] = [])).push(vote); });
+  comentarios.forEach(function (comment) { (commentsByWish[comment.deseo_id] || (commentsByWish[comment.deseo_id] = [])).push(comment); });
+  const allRecords = table_('registros');
   return {
-    registros: table_('registros').filter(function (row) { return !since || row.actualizado_en > since; }),
+    apiVersion: API_VERSION, syncProtocol: 1,
+    registros: allRecords.filter(function (row) { return !since || row.actualizado_en > since; }),
     categorias: table_('categorias'), deudas: table_('deudas'), recurrentes: table_('recurrentes'),
-    config: config_(), 
-    teams: table_('teams'),
-    deseos: table_('deseos'),
-    votos: table_('votos'),
-    comentarios: table_('comentarios'),
-    team_wallets: table_('team_wallets'),
+    config: config_(),
+    // Estas colecciones son snapshots completos. since filtra solo Registros.
+    // Sheets conserva miembros como JSON; la API lo expone siempre como arreglo.
+    teams: table_('teams').map(publicTeam_),
+    deseos: table_('deseos').map(function (wish) {
+      const aportes = {};
+      const markers = allRecords.filter(function (r) { return !r.eliminado && r.tipo === 'sin_gasto' && r.tags === 'deseo_aporte:' + wish.id; });
+      markers.forEach(function (r) { aportes[r.usuario_id] = Math.round(((aportes[r.usuario_id] || 0) + r.monto) * 100) / 100; });
+      return Object.assign({}, wish, { aportes: aportes, monto_actual: markers.length ? markers.reduce(function (n, r) { return n + r.monto; }, 0) : wish.monto_actual, votos: votesByWish[wish.id] || [], comentarios: commentsByWish[wish.id] || [] }); }),
+    votos: votos, comentarios: comentarios, team_wallets: table_('team_wallets'),
     serverTime: nowIso_()
   };
 }
 
-function handleCreateTeam_(p) {
-  const nombre = text_(p.nombre, 'nombre', 100, true);
-  const rows = table_('teams');
-  const creator = p.usuario_id ? id_(p.usuario_id) : null;
-  if (!creator) throw apiError_('UNAUTHORIZED', 'Debes estar autenticado para crear un Team.');
-  const team = {
-    id: uuid_(),
-    nombre: nombre,
-    creador_id: creator,
-    miembros: JSON.stringify([creator]),
-    creado_en: nowIso_(),
-    actualizado_en: nowIso_(),
-    activo: true
-  };
-  rows.push(team);
-  writeChanges_('teams', rows, [rows.length - 1]);
-  
-  // Crear wallet inicial para el team
+function teamMembers_(team) {
+  let values = team.miembros;
+  if (typeof values === 'string') {
+    try { values = JSON.parse(values); } catch (error) { values = []; }
+  }
+  const members = Array.isArray(values) ? values.filter(function (value) { return typeof value === 'string' && value.trim(); }).map(function (value) { return value.trim(); }) : [];
+  // El creador conserva su acceso si una fila antigua no lo incluyó.
+  if (team.creador_id) members.unshift(String(team.creador_id));
+  return Array.from(new Set(members));
+}
+function publicTeam_(team) { return Object.assign({}, team, { miembros: teamMembers_(team) }); }
+function teamUser_(value) {
+  if (!value) throw apiError_('UNAUTHORIZED', 'Debes ingresar para continuar.');
+  const id = id_(value);
+  if (!table_('usuarios').some(function (user) { return user.id === id; })) throw apiError_('USER_NOT_FOUND', 'El usuario no está registrado.');
+  return id;
+}
+function memberTeam_(teamId, userId) {
+  const team = table_('teams').find(function (row) { return row.id === id_(teamId) && row.activo; });
+  if (!team) throw apiError_('NOT_FOUND', 'Team no encontrado o inactivo.');
+  if (teamMembers_(team).indexOf(userId) < 0) throw apiError_('UNAUTHORIZED', 'No perteneces a este Team.');
+  return team;
+}
+function ensureTeamWallet_(team) {
   const wallets = table_('team_wallets');
-  const wallet = {
-    team_id: team.id,
-    saldo: 0,
-    creado_en: nowIso_(),
-    actualizado_en: nowIso_()
-  };
+  const existing = wallets.find(function (wallet) { return wallet.team_id === team.id; });
+  if (existing) return existing;
+  const stamp = nowIso_();
+  const wallet = { team_id: team.id, saldo: 0, creado_en: stamp, actualizado_en: stamp };
   wallets.push(wallet);
   writeChanges_('team_wallets', wallets, [wallets.length - 1]);
-  
-  return { id: team.id, nombre: team.nombre, creador_id: team.creador_id, miembros: JSON.parse(team.miembros) };
+  return wallet;
 }
-
+function handleCreateTeam_(p) {
+  const creator = teamUser_(p.usuario_id);
+  const nombre = text_(p.nombre, 'nombre', 100, true);
+  const id = p.id ? id_(p.id) : uuid_();
+  const rows = table_('teams');
+  const existing = rows.find(function (team) { return team.id === id; });
+  if (existing) {
+    if (existing.creador_id !== creator) throw apiError_('UNAUTHORIZED', 'El Team pertenece a otro creador.');
+    ensureTeamWallet_(existing);
+    return publicTeam_(existing);
+  }
+  // Resuelve todos los correos antes de crear el equipo: un correo inválido
+  // no deja un equipo parcial que el siguiente intento pudiera duplicar.
+  const invited = invitedUsers_(p.correos || []);
+  const stamp = nowIso_();
+  const team = { id: id, nombre: nombre, creador_id: creator, miembros: JSON.stringify(Array.from(new Set([creator].concat(invited)))), creado_en: stamp, actualizado_en: stamp, activo: true };
+  rows.push(team);
+  writeChanges_('teams', rows, [rows.length - 1]);
+  ensureTeamWallet_(team);
+  return publicTeam_(team);
+}
+function invitedUsers_(value) {
+  const values = typeof value === 'string' ? value.split(',') : value;
+  if (!Array.isArray(values) || values.length > 50) throw apiError_('VALIDATION_ERROR', 'Escribe hasta 50 correos separados por comas.');
+  const emails = Array.from(new Set(values.map(email_)));
+  const users = table_('usuarios');
+  return emails.map(function (correo) {
+    const user = users.find(function (row) { return row.correo.toLocaleLowerCase() === correo; });
+    if (!user) throw apiError_('USER_NOT_FOUND', 'El correo ' + correo + ' no está registrado.');
+    return user.id;
+  });
+}
 function handleInviteToTeam_(p) {
-  const teamId = id_(p.team_id);
-  const correo = email_(p.correo);
-  const teams = table_('teams');
-  const teamIndex = teams.findIndex(function (t) { return t.id === teamId; });
-  if (teamIndex < 0) throw apiError_('NOT_FOUND', 'Team no encontrado.');
-  const team = teams[teamIndex];
-  if (team.creador_id !== p.usuario_id) throw apiError_('UNAUTHORIZED', 'Solo el creador puede invitar miembros.');
-  
-  // Verificar que el correo existe en usuarios
-  const usuarios = table_('usuarios');
-  const usuario = usuarios.find(function (u) { return u.correo === correo; });
-  if (!usuario) throw apiError_('USER_NOT_FOUND', 'El correo no está registrado en la base de datos.');
-  
-  const miembros = JSON.parse(team.miembros);
-  if (miembros.indexOf(usuario.id) >= 0) throw apiError_('ALREADY_MEMBER', 'El usuario ya es miembro del Team.');
-  
-  miembros.push(usuario.id);
-  team.miembros = JSON.stringify(miembros);
-  team.actualizado_en = nowIso_();
-  writeChanges_('teams', teams, [teamIndex]);
-  
-  return { id: team.id, nombre: team.nombre, miembros: miembros };
+  const userId = teamUser_(p.usuario_id);
+  const team = memberTeam_(p.team_id, userId);
+  if (team.creador_id !== userId) throw apiError_('UNAUTHORIZED', 'Solo el creador puede invitar miembros.');
+  const invited = invitedUsers_(p.correos || p.correo);
+  const members = teamMembers_(team);
+  const nextMembers = Array.from(new Set(members.concat(invited)));
+  if (nextMembers.length !== members.length) {
+    const wishes = table_('deseos').filter(function (w) { return w.team_id === team.id && !w.eliminado; });
+    const funded = table_('registros').some(function (r) { return !r.eliminado && r.tipo === 'sin_gasto' && wishes.some(function (w) { return r.tags === 'deseo_aporte:' + w.id; }); });
+    if (funded) throw apiError_('VALIDATION_ERROR', 'Este Team ya tiene aportes. Crea otro Team para cambiar los participantes sin alterar las cuotas.');
+    team.miembros = JSON.stringify(nextMembers); team.actualizado_en = nowIso_();
+    const rows = table_('teams'); const index = rows.findIndex(function (row) { return row.id === team.id; });
+    rows[index] = team; writeChanges_('teams', rows, [index]);
+  }
+  return publicTeam_(team);
 }
-
 function handleCreateWish_(p) {
-  const teamId = id_(p.team_id);
+  const creator = teamUser_(p.usuario_id);
+  const team = memberTeam_(p.team_id, creator);
   const titulo = text_(p.titulo, 'titulo', 200, true);
-  const descripcion = text_(p.descripcion, 'descripcion', 500, true);
-  const montoObjetivo = number_(p.monto_objetivo, 'monto_objetivo', 0, 1000000000000);
-  const creadorId = p.usuario_id ? id_(p.usuario_id) : null;
-  if (!creadorId) throw apiError_('UNAUTHORIZED', 'Debes estar autenticado para crear un Deseo.');
-  
-  const teams = table_('teams');
-  const team = teams.find(function (t) { return t.id === teamId; });
-  if (!team) throw apiError_('NOT_FOUND', 'Team no encontrado.');
-  
-  const miembros = JSON.parse(team.miembros);
-  if (miembros.indexOf(creadorId) < 0) throw apiError_('UNAUTHORIZED', 'No eres miembro de este Team.');
-  
-  const deseos = table_('deseos');
-  const deseo = {
-    id: uuid_(),
-    team_id: teamId,
-    titulo: titulo,
-    descripcion: descripcion,
-    monto_objetivo: montoObjetivo,
-    monto_actual: 0,
-    creador_id: creadorId,
-    creado_en: nowIso_(),
-    actualizado_en: nowIso_(),
-    eliminado: false,
-    aprobado: false
-  };
-  deseos.push(deseo);
-  writeChanges_('deseos', deseos, [deseos.length - 1]);
-  
-  return deseo;
+  const descripcion = text_(p.descripcion || '', 'descripcion', 500, false);
+  const goal = number_(p.monto_objetivo, 'monto_objetivo', 0.01, 1000000000000);
+  const id = p.id ? id_(p.id) : uuid_();
+  const rows = table_('deseos');
+  const existing = rows.find(function (wish) { return wish.id === id; });
+  if (existing) {
+    if (existing.creador_id !== creator || existing.team_id !== team.id) throw apiError_('UNAUTHORIZED', 'El deseo pertenece a otro Team o creador.');
+    return Object.assign({}, existing, { votos: table_('votos').filter(function (v) { return v.deseo_id === id; }), comentarios: table_('comentarios').filter(function (c) { return c.deseo_id === id; }) });
+  }
+  const stamp = nowIso_();
+  const wish = { id: id, team_id: team.id, titulo: titulo, descripcion: descripcion, monto_objetivo: goal, monto_actual: 0, creador_id: creator, creado_en: stamp, actualizado_en: stamp, eliminado: false, aprobado: false };
+  rows.push(wish); writeChanges_('deseos', rows, [rows.length - 1]);
+  return Object.assign({}, wish, { votos: [], comentarios: [] });
+}
+function memberWish_(wishId, userId) {
+  const rows = table_('deseos');
+  const index = rows.findIndex(function (wish) { return wish.id === id_(wishId) && !wish.eliminado; });
+  if (index < 0) throw apiError_('NOT_FOUND', 'Deseo no encontrado.');
+  return { rows: rows, index: index, wish: rows[index], team: memberTeam_(rows[index].team_id, userId) };
+}
+// Soft deletion keeps recorded money and audit history intact.
+function handleDeleteWish_(p) {
+  const userId = teamUser_(p.usuario_id);
+  const rows = table_('deseos');
+  const index = rows.findIndex(function (wish) { return wish.id === id_(p.deseo_id); });
+  if (index < 0) throw apiError_('NOT_FOUND', 'Deseo no encontrado.');
+  const wish = rows[index];
+  const team = memberTeam_(wish.team_id, userId);
+  if (wish.creador_id !== userId && team.creador_id !== userId) throw apiError_('UNAUTHORIZED', 'Solo el creador del deseo o del Team puede eliminarlo.');
+  if (!wish.eliminado) {
+    wish.eliminado = true; wish.actualizado_en = nowIso_();
+    writeChanges_('deseos', rows, [index]);
+  }
+  return { deseo_id: wish.id, eliminado: true };
 }
 
 function handleVoteWish_(p) {
-  const deseoId = id_(p.deseo_id);
-  const tipo = enum_(p.tipo, VOTO_TIPOS_, 'tipo');
-  const usuarioId = p.usuario_id ? id_(p.usuario_id) : null;
-  if (!usuarioId) throw apiError_('UNAUTHORIZED', 'Debes estar autenticado para votar.');
-  
-  const deseos = table_('deseos');
-  const deseoIndex = deseos.findIndex(function (d) { return d.id === deseoId; });
-  if (deseoIndex < 0) throw apiError_('NOT_FOUND', 'Deseo no encontrado.');
-  const deseo = deseos[deseoIndex];
-  
-  const teams = table_('teams');
-  const team = teams.find(function (t) { return t.id === deseo.team_id; });
-  if (!team) throw apiError_('NOT_FOUND', 'Team no encontrado.');
-  const miembros = JSON.parse(team.miembros);
-  if (miembros.indexOf(usuarioId) < 0) throw apiError_('UNAUTHORIZED', 'No eres miembro de este Team.');
-  
-  const votos = table_('votos');
-  // Verificar si ya votó
-  const existingVoteIndex = votos.findIndex(function (v) { return v.deseo_id === deseoId && v.usuario_id === usuarioId; });
-  if (existingVoteIndex >= 0) {
-    // Actualizar voto existente
-    votos[existingVoteIndex].tipo = tipo;
-    votos[existingVoteIndex].creado_en = nowIso_();
-  } else {
-    // Crear nuevo voto
-    const voto = {
-      id: uuid_(),
-      deseo_id: deseoId,
-      usuario_id: usuarioId,
-      tipo: tipo,
-      creado_en: nowIso_()
-    };
-    votos.push(voto);
-  }
-  writeChanges_('votos', votos, existingVoteIndex >= 0 ? [existingVoteIndex] : [votos.length - 1]);
-  
-  // Verificar si todos los miembros dieron like
-  const likeCount = votos.filter(function (v) { return v.deseo_id === deseoId && v.tipo === 'like'; }).length;
-  const aprobado = likeCount === miembros.length && miembros.length > 0;
-  
-  if (aprobado && !deseo.aprobado) {
-    deseo.aprobado = true;
-    deseo.actualizado_en = nowIso_();
-    writeChanges_('deseos', deseos, [deseoIndex]);
-  }
-  
-  return { deseo_id: deseoId, tipo: tipo, aprobado: aprobado };
+  const userId = teamUser_(p.usuario_id);
+  const ctx = memberWish_(p.deseo_id, userId);
+  const tipo = enum_(p.tipo, ['like', 'dislike', 'revision'], 'tipo');
+  const votes = table_('votos');
+  let index = votes.findIndex(function (vote) { return vote.deseo_id === ctx.wish.id && vote.usuario_id === userId; });
+  if (index < 0) index = votes.length;
+  votes[index] = { id: votes[index] ? votes[index].id : uuid_(), deseo_id: ctx.wish.id, usuario_id: userId, tipo: tipo, creado_en: nowIso_() };
+  writeChanges_('votos', votes, [index]);
+  const members = teamMembers_(ctx.team);
+  const approved = members.length > 0 && members.every(function (member) { return votes.some(function (vote) { return vote.deseo_id === ctx.wish.id && vote.usuario_id === member && vote.tipo === 'like'; }); });
+  ctx.wish.aprobado = approved; ctx.wish.actualizado_en = nowIso_();
+  writeChanges_('deseos', ctx.rows, [ctx.index]);
+  return { deseo_id: ctx.wish.id, tipo: tipo, aprobado: approved };
 }
-
 function handleAddComment_(p) {
-  const deseoId = id_(p.deseo_id);
+  const userId = teamUser_(p.usuario_id);
+  const ctx = memberWish_(p.deseo_id, userId);
   const texto = text_(p.texto, 'texto', 1000, true);
-  const usuarioId = p.usuario_id ? id_(p.usuario_id) : null;
-  if (!usuarioId) throw apiError_('UNAUTHORIZED', 'Debes estar autenticado para comentar.');
-  
-  const deseos = table_('deseos');
-  const deseo = deseos.find(function (d) { return d.id === deseoId; });
-  if (!deseo) throw apiError_('NOT_FOUND', 'Deseo no encontrado.');
-  
-  const teams = table_('teams');
-  const team = teams.find(function (t) { return t.id === deseo.team_id; });
-  if (!team) throw apiError_('NOT_FOUND', 'Team no encontrado.');
-  const miembros = JSON.parse(team.miembros);
-  if (miembros.indexOf(usuarioId) < 0) throw apiError_('UNAUTHORIZED', 'No eres miembro de este Team.');
-  
-  const comentarios = table_('comentarios');
-  const comentario = {
-    id: uuid_(),
-    deseo_id: deseoId,
-    usuario_id: usuarioId,
-    texto: texto,
-    creado_en: nowIso_()
-  };
-  comentarios.push(comentario);
-  writeChanges_('comentarios', comentarios, [comentarios.length - 1]);
-  
-  return comentario;
+  const id = p.id ? id_(p.id) : uuid_();
+  const rows = table_('comentarios');
+  const existing = rows.find(function (comment) { return comment.id === id; });
+  if (existing) {
+    if (existing.usuario_id !== userId || existing.deseo_id !== ctx.wish.id) throw apiError_('UNAUTHORIZED', 'El comentario pertenece a otro miembro.');
+    return existing;
+  }
+  const comment = { id: id, deseo_id: ctx.wish.id, usuario_id: userId, texto: texto, creado_en: nowIso_() };
+  rows.push(comment); writeChanges_('comentarios', rows, [rows.length - 1]);
+  return comment;
 }
 
-function handleAddToWallet_(p) {
-  const teamId = id_(p.team_id);
-  const monto = number_(p.monto, 'monto', 0, 1000000000000);
-  const usuarioId = p.usuario_id ? id_(p.usuario_id) : null;
-  if (!usuarioId) throw apiError_('UNAUTHORIZED', 'Debes estar autenticado.');
-  
-  const teams = table_('teams');
-  const team = teams.find(function (t) { return t.id === teamId; });
-  if (!team) throw apiError_('NOT_FOUND', 'Team no encontrado.');
-  const miembros = JSON.parse(team.miembros);
-  if (miembros.indexOf(usuarioId) < 0) throw apiError_('UNAUTHORIZED', 'No eres miembro de este Team.');
-  
-  const wallets = table_('team_wallets');
-  const walletIndex = wallets.findIndex(function (w) { return w.team_id === teamId; });
-  if (walletIndex < 0) throw apiError_('NOT_FOUND', 'Wallet no encontrada.');
-  
-  wallets[walletIndex].saldo += monto;
-  wallets[walletIndex].actualizado_en = nowIso_();
-  writeChanges_('team_wallets', wallets, [walletIndex]);
-  
-  return { team_id: teamId, saldo: wallets[walletIndex].saldo };
+// Contributions are journaled with deterministic IDs under the script lock.
+// The owner books the entire budget once; invited members book their own share.
+function handleContributeWish_(p) {
+  const userId = teamUser_(p.usuario_id);
+  const ctx = memberWish_(p.deseo_id, userId);
+  const amount = number_(p.monto, 'monto', 0.01, 1000000000000);
+  if (Math.abs(amount * 100 - Math.round(amount * 100)) > 0.00001) throw apiError_('VALIDATION_ERROR', 'El aporte admite hasta dos decimales.');
+  const operationId = id_(p.id);
+  const markerId = 'wish-contribution-' + operationId;
+  const rows = table_('registros');
+  const tag = 'deseo_aporte:' + ctx.wish.id;
+  const existing = rows.find(function (r) { return r.id === markerId; });
+  if (existing) {
+    if (existing.usuario_id !== userId || existing.tags !== tag || existing.monto !== amount) throw apiError_('VALIDATION_ERROR', 'El ID del aporte ya fue utilizado.');
+    return { deseo_id: ctx.wish.id };
+  }
+  const members = teamMembers_(ctx.team);
+  const votes = table_('votos');
+  if (!members.every(function (m) { return votes.some(function (v) { return v.deseo_id === ctx.wish.id && v.usuario_id === m && v.tipo === 'like'; }); })) throw apiError_('VALIDATION_ERROR', 'Todos deben aprobar el deseo antes de aportar.');
+  const totalCents = Math.round(ctx.wish.monto_objetivo * 100);
+  const ordered = members.slice().sort();
+  const quota = (Math.floor(totalCents / ordered.length) + (ordered.indexOf(userId) < totalCents % ordered.length ? 1 : 0)) / 100;
+  const markers = rows.filter(function (r) { return !r.eliminado && r.tipo === 'sin_gasto' && r.tags === tag; });
+  if (!markers.length && ctx.wish.monto_actual > 0) throw apiError_('VALIDATION_ERROR', 'Este deseo tiene aportes históricos sin detalle por persona. Revisa esos aportes antes de usar el nuevo flujo.');
+  const paid = markers.filter(function (r) { return r.usuario_id === userId; }).reduce(function (n, r) { return n + r.monto; }, 0);
+  if (Math.round((paid + amount) * 100) > Math.round(quota * 100)) throw apiError_('VALIDATION_ERROR', 'El aporte supera tu cuota pendiente.');
+  const categories = table_('categorias');
+  const expense = categories.find(function (c) { return c.tipo === 'gasto' && c.activa; });
+  const income = categories.find(function (c) { return c.tipo === 'ingreso' && c.activa; });
+  if (!expense || !income) throw apiError_('VALIDATION_ERROR', 'Debes tener categorías activas de ingreso y gasto.');
+  const stamp = nowIso_();
+  const date = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd');
+  const touched = [];
+  function append(id, type, value, owner, tags) {
+    if (rows.some(function (r) { return r.id === id; })) return;
+    rows.push({ id: id, fecha: date, tipo: type, subtipo: type === 'ingreso' ? 'adicional' : type === 'gasto' ? 'variable' : '', monto: value,
+      categoria: type === 'ingreso' ? income.nombre : expense.nombre, tags: tags, descripcion: 'Deseo: ' + ctx.wish.titulo,
+      metodo_pago: 'transferencia', necesidad: type === 'gasto' ? 'necesario' : '', recurrente_id: '', deuda_id: '',
+      creado_en: stamp, actualizado_en: stamp, eliminado: false, usuario_id: owner });
+    touched.push(rows.length - 1);
+  }
+  if (userId === ctx.wish.creador_id) {
+    append('wish-budget-' + ctx.wish.id, 'gasto', ctx.wish.monto_objetivo, userId, 'deseo_presupuesto:' + ctx.wish.id);
+  } else {
+    append(markerId + '-expense', 'gasto', amount, userId, 'deseo_transferencia:' + ctx.wish.id);
+    append(markerId + '-income', 'ingreso', amount, ctx.wish.creador_id, 'deseo_transferencia:' + ctx.wish.id);
+  }
+  append(markerId, 'sin_gasto', amount, userId, tag);
+  writeChanges_('registros', rows, touched);
+  ctx.wish.monto_actual = Math.round((markers.reduce(function (n, r) { return n + r.monto; }, 0) + amount) * 100) / 100;
+  ctx.wish.actualizado_en = stamp;
+  writeChanges_('deseos', ctx.rows, [ctx.index]);
+  return { deseo_id: ctx.wish.id };
 }
 
-function handleWithdrawFromWallet_(p) {
-  const teamId = id_(p.team_id);
-  const monto = number_(p.monto, 'monto', 0, 1000000000000);
-  const usuarioId = p.usuario_id ? id_(p.usuario_id) : null;
-  if (!usuarioId) throw apiError_('UNAUTHORIZED', 'Debes estar autenticado.');
-  
-  const teams = table_('teams');
-  const team = teams.find(function (t) { return t.id === teamId; });
-  if (!team) throw apiError_('NOT_FOUND', 'Team no encontrado.');
-  if (team.creador_id !== usuarioId) throw apiError_('UNAUTHORIZED', 'Solo el creador puede retirar de la wallet.');
-  
-  const wallets = table_('team_wallets');
-  const walletIndex = wallets.findIndex(function (w) { return w.team_id === teamId; });
-  if (walletIndex < 0) throw apiError_('NOT_FOUND', 'Wallet no encontrada.');
-  
-  if (wallets[walletIndex].saldo < monto) throw apiError_('INSUFFICIENT_FUNDS', 'Saldo insuficiente en la wallet.');
-  
-  wallets[walletIndex].saldo -= monto;
-  wallets[walletIndex].actualizado_en = nowIso_();
-  writeChanges_('team_wallets', wallets, [walletIndex]);
-  
-  return { team_id: teamId, saldo: wallets[walletIndex].saldo };
+function handleAddToWallet_(p) { return changeTeamWallet_(p, false); }
+function handleWithdrawFromWallet_(p) { return changeTeamWallet_(p, true); }
+function changeTeamWallet_(p, withdraw) {
+  const userId = teamUser_(p.usuario_id);
+  const team = memberTeam_(p.team_id, userId);
+  if (withdraw && team.creador_id !== userId) throw apiError_('UNAUTHORIZED', 'Solo el creador puede retirar de la cartera.');
+  const amount = number_(p.monto, 'monto', 0.01, 1000000000000);
+  const rows = table_('team_wallets');
+  const index = rows.findIndex(function (wallet) { return wallet.team_id === team.id; });
+  if (index < 0) throw apiError_('NOT_FOUND', 'La cartera del Team no existe.');
+  if (withdraw && rows[index].saldo < amount) throw apiError_('INSUFFICIENT_FUNDS', 'Saldo insuficiente en la cartera.');
+  const next = rows[index].saldo + (withdraw ? -amount : amount);
+  number_(next, 'saldo', 0, 1000000000000);
+  rows[index].saldo = Math.round(next * 100) / 100; rows[index].actualizado_en = nowIso_();
+  writeChanges_('team_wallets', rows, [index]);
+  return rows[index];
 }
 
-// Handlers existentes (sin cambios)
 function handleUpsert_(p) {
   const result = applyOperations_([{ action: 'upsert', registro: p.registro }]);
   return result.registros[0];
@@ -393,12 +420,30 @@ function handleUpsert_(p) {
 
 function handleDelete_(p) {
   const result = applyOperations_([{ action: 'delete', id: p.id, actualizado_en: p.actualizado_en }]);
+  // Eliminar un ID inexistente es un no-op idempotente.
   return result.registros[0] || { id: id_(p.id), eliminado: true, actualizado_en: result.serverTime };
 }
 
 function handleBatch_(p) {
   if (!Array.isArray(p.operations) || p.operations.length > 250) throw apiError_('VALIDATION_ERROR', 'operations debe ser un arreglo de hasta 250 operaciones.');
   return applyOperations_(p.operations);
+}
+
+function handleSync_(p) {
+  if (!Array.isArray(p.operations) || p.operations.length > 250) throw apiError_('VALIDATION_ERROR', 'operations debe ser un arreglo de hasta 250 operaciones.');
+  const categories = table_('categorias');
+  const previous = Array.isArray(p.categorias) ? p.categorias : [];
+  const operations = p.operations.map(function (op) {
+    if (!op || op.action !== 'upsert' || !op.registro) return op;
+    const row = Object.assign({}, op.registro);
+    const tipo = row.tipo === 'ingreso' ? 'ingreso' : 'gasto';
+    const old = previous.find(function (category) { return category.nombre === row.categoria; });
+    const renamed = old && categories.find(function (category) { return category.id === old.id && category.tipo === tipo; });
+    if (renamed) row.categoria = renamed.nombre;
+    return { action: 'upsert', registro: row };
+  });
+  const result = applyOperations_(operations);
+  return Object.assign(result, { snapshot: handleList_({}) });
 }
 
 function applyOperations_(operations) {
@@ -409,9 +454,13 @@ function applyOperations_(operations) {
   const ctx = context_();
   const touched = Object.create(null);
   const returned = Object.create(null);
+  // Valida todo sobre una copia en memoria antes de escribir una sola fila.
+  // Dentro del batch compara las fechas CLIENTE aceptadas, sin que las nuevas
+  // fechas de servidor oculten una edición posterior todavía en la cola.
   operations.forEach(function (op) {
     if (!op || (op.action !== 'upsert' && op.action !== 'delete')) throw apiError_('VALIDATION_ERROR', 'Solo se permiten upsert y delete en batch.');
     const id = id_(op.action === 'upsert' && op.registro ? op.registro.id : op.id);
+    if (/^wish-(contribution|budget)-/.test(id)) throw apiError_('VALIDATION_ERROR', 'Los movimientos de deseos se gestionan desde el deseo.');
     const index = byId[id];
     const previous = index === undefined ? null : rows[index];
     const rawStamp = op.action === 'upsert' && op.registro ? op.registro.actualizado_en : op.actualizado_en;
@@ -421,10 +470,12 @@ function applyOperations_(operations) {
     if (op.action === 'upsert') next = validate_(op.registro, ctx);
     if (previous && clientStamp && clientStamp <= (original[id] || '')) { returned[id] = previous; return; }
     if (op.action === 'delete' && !previous) return;
+    // Reintentar una creación sin fecha de edición no debe revivir tombstones.
     if (previous && previous.eliminado && !clientStamp && op.action === 'upsert') { returned[id] = previous; return; }
     const stamp = nowIso_(clientStamp);
     if (op.action === 'delete') next = Object.assign({}, previous, { eliminado: true, actualizado_en: stamp });
-    else next = Object.assign(next, { creado_en: previous ? previous.creado_en : stamp, actualizado_en: stamp });
+    else next = Object.assign(next, { creado_en: previous ? previous.creado_en : stamp, actualizado_en: stamp,
+      usuario_id: previous && previous.usuario_id ? previous.usuario_id : next.usuario_id });
     const nextIndex = index === undefined ? rows.length : index;
     byId[id] = nextIndex;
     rows[nextIndex] = next;
@@ -459,6 +510,8 @@ function handleSaveEntity_(p) {
   }
   if (index < 0) index = rows.length;
   rows[index] = obj;
+  // La entidad se escribe al final para que un reintento pueda completar una
+  // cascada interrumpida usando todavía el nombre anterior como referencia.
   writeChanges_('registros', records, changedRecords);
   writeChanges_('recurrentes', recurring, changedRecurring);
   writeChanges_(key, rows, [index]);
@@ -486,6 +539,7 @@ function handleMaterialize_() {
   const templates = table_('recurrentes');
   const records = table_('registros');
   const existing = Object.create(null);
+  // También cuentan los borrados: eliminar una ocurrencia no la vuelve a crear.
   records.forEach(function (r) { if (r.recurrente_id) existing[r.recurrente_id + '|' + r.fecha] = true; });
   const today = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd');
   const ctx = context_();
@@ -498,6 +552,7 @@ function handleMaterialize_() {
     validateEntity_('recurrente', template, ctx);
     let cursor = template.proximo_pago;
     const initial = cursor;
+    // Se avanza solo lo procesado; backlogs grandes continúan en otra llamada.
     while (cursor <= today && processed < 500) {
       const key = template.id + '|' + cursor;
       if (!existing[key]) {
@@ -511,6 +566,7 @@ function handleMaterialize_() {
     }
     if (cursor !== initial) { template.proximo_pago = cursor; changedTemplates.push(index); }
   });
+  // Guardar registros primero hace seguros los reintentos tras fallo parcial.
   writeChanges_('registros', records, changedRecords);
   writeChanges_('recurrentes', templates, changedTemplates);
   return { registros: generated, recurrentes: templates, pending: templates.some(function (r) { return r.activa && r.proximo_pago <= today; }), serverTime: nowIso_() };
@@ -526,6 +582,7 @@ function handleRegister_(p) {
   const row = { id: uuid_(), nombre: nombre, correo: correo, password_hash: hashPassword_(password, salt), salt: salt, creado_en: nowIso_() };
   rows.push(row);
   writeChanges_('usuarios', rows, [rows.length - 1]);
+  // Nunca se devuelve el hash, la sal ni el resto de la hoja de usuarios.
   return { id: row.id, nombre: row.nombre, correo: row.correo };
 }
 
@@ -533,6 +590,7 @@ function handleLogin_(p) {
   const correo = email_(p.correo);
   const password = text_(p.password, 'password', 200, true);
   const user = table_('usuarios').find(function (row) { return row.correo === correo; });
+  // Un mensaje genérico evita confirmar si el correo existe en el libro.
   if (!user || !sameToken_(hashPassword_(password, user.salt), user.password_hash)) throw apiError_('UNAUTHORIZED', 'Correo o contraseña incorrectos.');
   return { id: user.id, nombre: user.nombre, correo: user.correo };
 }
@@ -543,6 +601,7 @@ function validate_(value, ctx) {
     id: id_(value.id), fecha: date_(value.fecha, 'fecha'), tipo: enum_(value.tipo, TIPOS_, 'tipo'),
     subtipo: text_(value.subtipo == null ? '' : value.subtipo, 'subtipo', 20, false),
     monto: number_(value.monto, 'monto', 0, 1000000000000),
+    categoria: text_(value.categoria == null ? '' : value.categoria, 'categoria', 80, false),
     tags: tags_(value.tags || ''), descripcion: text_(value.descripcion || '', 'descripcion', 500, false),
     metodo_pago: enum_(value.metodo_pago || 'otro', METODOS_, 'metodo_pago'),
     necesidad: text_(value.necesidad || '', 'necesidad', 20, false),
@@ -557,6 +616,11 @@ function validate_(value, ctx) {
   if (row.tipo === 'sin_gasto') {
     if (row.monto !== 0) throw apiError_('VALIDATION_ERROR', 'sin_gasto requiere monto 0.');
     if (!row.categoria) row.categoria = ctx.categorias.find(function (c) { return c.nombre === 'Otros'; }) ? 'Otros' : ctx.categorias[0].nombre;
+  }
+  // Clientes antiguos podían guardar "Deudas" tras renombrar esa categoría.
+  if ((row.tipo === 'deuda_pago' || row.tipo === 'deuda_aumento') && !ctx.categorias.some(function (c) { return c.nombre === row.categoria && c.tipo === 'gasto'; })) {
+    const debtCategory = ctx.categorias.find(function (c) { return c.id === 'cat-deudas' && c.tipo === 'gasto'; }) || ctx.categorias.find(function (c) { return c.tipo === 'gasto' && c.activa; });
+    if (debtCategory) row.categoria = debtCategory.nombre;
   }
   const category = ctx.categorias.find(function (c) { return c.nombre === row.categoria; });
   if (!category) throw apiError_('VALIDATION_ERROR', 'La categoría no existe.');
@@ -576,7 +640,7 @@ function validateEntity_(entity, value, ctx) {
   if (entity === 'categoria') {
     const color = text_(value.color, 'color', 7, true);
     if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw apiError_('VALIDATION_ERROR', 'color debe ser hexadecimal de seis dígitos.');
-    return Object.assign(base, { nombre: text_(value.nombre, 'nombre', 80, true), tipo: enum_(value.tipo, ['ingreso', 'gasto'], 'tipo'), color: color, icono: text_(value.icono || 'CircleEllipsis', 'icono', 40, true), presupuesto_mensual: number_(value.presupuesto_mensual, 'presupuesto_mensual', 0, 1000000000000) });
+    return Object.assign(base, { nombre: text_(value.nombre, 'nombre', 80, true), tipo: enum_(value.tipo, ['ingreso', 'gasto'], 'tipo'), color: color, icono: text_(value.icono || 'CircleEllipsis', 'icono', 40, true), presupuesto_mensual: 0 });
   }
   if (entity === 'deuda') return Object.assign(base, { nombre: text_(value.nombre, 'nombre', 100, true), acreedor: text_(value.acreedor || '', 'acreedor', 150, false), monto_inicial: number_(value.monto_inicial, 'monto_inicial', 0, 1000000000000), tasa_interes_mensual: number_(value.tasa_interes_mensual, 'tasa_interes_mensual', 0, 100), fecha_inicio: date_(value.fecha_inicio, 'fecha_inicio'), cuota_minima: number_(value.cuota_minima, 'cuota_minima', 0, 1000000000000), dia_pago: integer_(value.dia_pago, 'dia_pago', 1, 31) });
   if (base.id.length > 180) throw apiError_('VALIDATION_ERROR', 'El ID de una plantilla no debe superar 180 caracteres.');
@@ -601,29 +665,40 @@ function book_() {
   if (!bookCache_) bookCache_ = SpreadsheetApp.openById(SPREADSHEET_ID);
   return bookCache_;
 }
-function sheet_(name) { const result = book_().getSheetByName(name); if (!result) throw apiError_('SCHEMA_MISMATCH', 'Falta una pestaña. Ejecuta setup().'); return result; }
+function sheet_(name) { const result = sheetCache_[name] || book_().getSheetByName(name); if (!result) throw apiError_('SCHEMA_MISMATCH', 'Falta una pestaña. Ejecuta setup().'); sheetCache_[name] = result; return result; }
+// Una celda con casilla (activa/eliminado) sin escribir vale FALSE en Sheets, no '';
+// sin esto, una fila nunca usada se confunde con una fila corrupta por tener datos.
 function isBlankRow_(row, headers) {
   return row.every(function (value, i) { return BOOLEAN_FIELDS_.indexOf(headers[i]) >= 0 ? (value === '' || value === false) : value === ''; });
 }
 function table_(key) {
+  if (tableCache_[key]) return JSON.parse(JSON.stringify(tableCache_[key]));
   const headers = HEADERS_[key];
   const rows = sheet_(TABLE_NAMES_[key]).getDataRange().getValues().slice(1);
+  // No comprimir huecos: cambiaría los índices y podría sobrescribir otra fila.
   while (rows.length && isBlankRow_(rows[rows.length - 1], headers)) rows.pop();
+  // 'id' (columna A, row[0]) es la clave que HEADERS_[key] espera en cada fila; blank === sin ID/clave.
   const eliminadoIndex = headers.indexOf('eliminado');
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (row[0]) continue;
+    // Solo en Registros, una fila totalmente vacía (resto de columnas también vacías) se
+    // trata como un borrado lógico en vez de bloquear la sincronización de todo el libro;
+    // conserva su posición para no desplazar los índices de las demás filas.
     if (key !== 'registros' || !isBlankRow_(row, headers)) throw apiError_('SCHEMA_MISMATCH', 'Hay una fila sin ID/clave en ' + TABLE_NAMES_[key] + ' (fila ' + (i + 2) + '). Corrige la hoja antes de sincronizar.');
     row[0] = 'blank-row-' + (i + 2);
     if (eliminadoIndex >= 0) row[eliminadoIndex] = true;
   }
-  return rows.map(function (row) { return rowToObj_(row, HEADERS_[key]); });
+  const result = rows.map(function (row) { return rowToObj_(row, HEADERS_[key]); });
+  tableCache_[key] = result;
+  return JSON.parse(JSON.stringify(result));
 }
 function rowToObj_(row, headers) {
   const result = {};
   headers.forEach(function (field, index) {
     let value = row[index] == null ? '' : row[index];
     if (value instanceof Date) value = Utilities.formatDate(value, TIMEZONE, DATE_FIELDS_.indexOf(field) >= 0 ? 'yyyy-MM-dd' : "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+    // ISO timestamps are always UTC; manually entered sheet dates use TIMEZONE.
     if ((field === 'creado_en' || field === 'actualizado_en') && row[index] instanceof Date) value = row[index].toISOString();
     if (BOOLEAN_FIELDS_.indexOf(field) >= 0) value = value === true || String(value).toLowerCase() === 'true';
     else if (NUMERIC_FIELDS_.indexOf(field) >= 0) value = Number(value) || 0;
@@ -634,8 +709,10 @@ function rowToObj_(row, headers) {
 }
 function objToRow_(obj, headers) { return headers.map(function (field) { const value = obj[field] == null ? '' : obj[field]; return typeof value === 'string' && /^[=+\-@]/.test(value) ? "'" + value : value; }); }
 
+// Agrupa filas contiguas; nunca llama setValue/getValue por celda.
 function writeChanges_(key, rows, indexes) {
   if (!indexes.length) return;
+  delete tableCache_[key];
   const unique = Array.from(new Set(indexes)).sort(function (a, b) { return a - b; });
   const sheet = sheet_(TABLE_NAMES_[key]);
   const needed = unique[unique.length - 1] + 2;
@@ -692,6 +769,8 @@ function tags_(value) { return Array.from(new Set(text_(value, 'tags', 500, fals
 function sameToken_(a, b) { let diff = a.length ^ b.length; for (let i = 0; i < b.length; i++) diff |= (a.charCodeAt(i) || 0) ^ b.charCodeAt(i); return diff === 0; }
 function uuid_() { return Utilities.getUuid(); }
 function nowIso_(minimum) {
+  // El cursor siempre queda después de toda escritura previa, incluso dentro
+  // del mismo milisegundo; se invoca únicamente mientras tenemos script lock.
   const props = PropertiesService.getScriptProperties();
   const last = Number(props.getProperty('DRIP_LAST_CLOCK') || 0);
   const current = Math.max(Date.now(), last + 1, minimum ? Date.parse(minimum) : 0);

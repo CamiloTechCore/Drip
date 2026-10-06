@@ -20,7 +20,6 @@ import {
   RefreshCw,
   X,
   Check,
-  FlaskConical,
   Star,
 } from "lucide-react";
 import { useRegisterSW } from "virtual:pwa-register/react";
@@ -79,7 +78,7 @@ export default function App() {
 function DripApp() {
   const model = useData();
   const { user } = useAuth();
-  const needsAuth = !model.isDemo && !user;
+  const needsAuth = !user;
   const location = useLocation();
   const [capture, setCapture] = useState<{ record?: Registro } | null>(null);
   const [savingsCapture, setSavingsCapture] = useState<{ mode: SavingsMode; record?: Registro } | null>(null);
@@ -145,19 +144,12 @@ function DripApp() {
           <span
             className={`connection-status ${!online ? "offline" : ""}`}
             title={
-              model.isDemo
-                ? "Los datos de ejemplo nunca se sincronizan"
-                : model.pending
+              model.pending
                   ? "Guardado en este dispositivo"
                   : "Estado de conexión"
             }
           >
-            {model.isDemo ? (
-              <>
-                <FlaskConical size={14} />
-                Demo
-              </>
-            ) : model.syncing ? (
+            {model.syncing ? (
               <>
                 <RefreshCw size={14} className="spin" />
                 Sincronizando
@@ -180,12 +172,6 @@ function DripApp() {
             )}
           </span>
         </header>
-        {model.isDemo && (
-          <div className="demo-banner">
-            <span>Estás explorando con datos de ejemplo</span>
-            <button onClick={() => model.setDemo(false)}>Salir</button>
-          </div>
-        )}
         {model.error && (
           <div className="sync-error" role="alert">
             <span>{model.error}</span>

@@ -17,6 +17,7 @@ import { useDrip } from "../context";
 import {
   getAntExpenses,
   getCycles,
+  getTotals,
   getDebtSummary,
   getStreaks,
   todayISO,
@@ -28,7 +29,7 @@ import { Amount, Card, Empty, RecordRow, SectionTitle } from "../components/ui";
 import { CashChart } from "../components/Charts";
 import SavingsCard from "../components/SavingsCard";
 export default function Home() {
-  const { data, add, share, isDemo, setDemo, pendingIds } = useDrip();
+  const { data, add, share, pendingIds } = useDrip();
   const { registros, config, categorias } = data;
   const today = todayISO();
   const records = registros.filter((r) => !r.eliminado && r.fecha <= today);
@@ -45,10 +46,10 @@ export default function Home() {
     .sort((a, b) => a.proximo_pago.localeCompare(b.proximo_pago))[0];
   const hasData = records.length > 0;
   const currency = config.moneda;
-  const income = current?.income ?? 0,
-    expenses = current?.expenses ?? 0;
+  const totals = getTotals(records);
+  const income = totals.income, expenses = totals.expenses;
   // Payments are already included in cycle expenses; never subtract them twice.
-  const available = current?.available ?? 0;
+  const available = totals.available;
   return (
     <div className="page home-page">
       <div className="page-intro">
@@ -73,12 +74,10 @@ export default function Home() {
       <section className="balance-card">
         <div className="balance-top">
           <span>
-            <Wallet size={16} /> Disponible este ciclo
+            <Wallet size={16} /> Liquidez disponible
           </span>
           <span className="cycle-pill">
-            {current
-              ? `${format(parseISO(current.start), "d MMM", { locale: es })} – ${format(parseISO(current.end), "d MMM", { locale: es })}`
-              : "Tu ciclo"}
+            Historial completo
           </span>
         </div>
         <div className="balance-amount">
@@ -103,8 +102,8 @@ export default function Home() {
         </div>
         <div className="balance-footer">
           <span>
-            Para cada día{" "}
-            <strong>{money(current?.availablePerDay ?? 0, currency)}</strong>
+            Ahorro reservado{" "}
+            <strong>{money(totals.savingsDeposits - totals.savingsWithdrawals, currency)}</strong>
           </span>
           <span>
             {income ? Math.round((expenses / income) * 100) : 0}% gastado
@@ -131,11 +130,6 @@ export default function Home() {
           <button className="button primary full" onClick={() => add()}>
             Registrar mi primer movimiento
           </button>
-          {!isDemo && (
-            <button className="text-button full" onClick={() => setDemo(true)}>
-              Explorar con datos de ejemplo
-            </button>
-          )}
         </Card>
       )}
       <Link to="/analisis?section=racha" className="streak-card">
